@@ -14,7 +14,7 @@ import { ConfigError } from '../utils/errors.js';
 function required(key: string): string {
   const value = process.env[key];
   if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
+    throw new ConfigError(`Missing required environment variable: ${key}`);
   }
   return value;
 }
@@ -35,7 +35,7 @@ function parseInteger(key: string, defaultValue: number): number {
 
   const parsed = parseInt(value, 10);
   if (isNaN(parsed)) {
-    throw new Error(`Environment variable ${key} must be a valid integer, got: ${value}`);
+    throw new ConfigError(`Environment variable ${key} must be a valid integer, got: ${value}`);
   }
 
   return parsed;
@@ -46,7 +46,7 @@ function parseInteger(key: string, defaultValue: number): number {
  */
 function validateClubUrl(url: string): void {
   if (!url.startsWith('https://manvfatfootball.') && !url.startsWith('http://localhost')) {
-    throw new Error(
+    throw new ConfigError(
       `Invalid CLUB_URL: must be a manvfatfootball.org/club/* URL, got: ${url}`
     );
   }
@@ -57,7 +57,7 @@ function validateClubUrl(url: string): void {
  */
 function validateGroupId(jid: string | undefined): void {
   if (jid && !jid.endsWith('@g.us')) {
-    throw new Error(`Invalid AUTHORIZED_GROUP_ID: must be a WhatsApp group JID (*@g.us), got: ${jid}`);
+    throw new ConfigError(`Invalid AUTHORIZED_GROUP_ID: must be a WhatsApp group JID (*@g.us), got: ${jid}`);
   }
 }
 
@@ -91,8 +91,8 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
     }
   }
 
-  // Load environment variables from specified file
-  const result = config({ path: envPath });
+  // Load environment variables from specified file (quiet: true to suppress console output)
+  const result = config({ path: envPath, quiet: true });
 
   // If default .env doesn't exist, that's okay (use system env vars)
   // But if user specified --config and it failed, throw error

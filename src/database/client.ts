@@ -73,6 +73,3 @@ export function closeDatabase() {
     dbInstance = null;
   }
 }
-
-// Export the db instance for convenience
-export const { db } = getDatabase();

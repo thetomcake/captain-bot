@@ -3,7 +3,7 @@ import { eq, and, asc, gte } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
 import { Game, GameStatus } from '../types/entities.js';
 import { SeasonService } from './season-service.js';
-import { fetchFixtures as scrapeFix } from '../scraping/fixture-scraper.js';
+import { IFixtureScraper, DefaultFixtureScraper } from '../scraping/fixture-scraper.js';
 
 export interface FixtureChange {
   type: 'added' | 'updated' | 'removed';
@@ -19,10 +19,15 @@ export interface FixtureChanges {
 }
 
 export class FixtureService {
+  private scraper: IFixtureScraper;
+
   constructor(
     private db: BetterSQLite3Database<typeof schema>,
-    private seasonService: SeasonService
-  ) {}
+    private seasonService: SeasonService,
+    scraper?: IFixtureScraper
+  ) {
+    this.scraper = scraper || new DefaultFixtureScraper();
+  }
 
   /**
    * Fetch fixtures from club URL and store in database
@@ -48,8 +53,9 @@ export class FixtureService {
     // Get or create current season
     const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
 
-    // Scrape fixtures from club URL
-    const scrapedFixtures = await scrapeFix(team.clubUrl, { skipRateLimit: false });
+    // Scrape fixtures from club URL using injectable scraper
+    const html = await this.scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = this.scraper.parseFixtures(html);
 
     // Convert scraped fixtures to games and store
     const games: Game[] = [];
@@ -210,8 +216,9 @@ export class FixtureService {
       throw new Error(`Team not found: ${teamId}`);
     }
 
-    // Scrape current fixtures
-    const scrapedFixtures = await scrapeFix(team.clubUrl, { skipRateLimit: false });
+    // Scrape current fixtures using injectable scraper
+    const html = await this.scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = this.scraper.parseFixtures(html);
 
     const changes: FixtureChanges = {
       added: [],

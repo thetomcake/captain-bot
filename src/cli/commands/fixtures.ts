@@ -28,14 +28,22 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
       season = seasons.find(s => s.seasonNumber === options.season);
 
       if (!season) {
-        console.error(`Error: Season ${options.season} not found`);
+        if (options.json) {
+          console.log(JSON.stringify({ error: `Season ${options.season} not found` }));
+        } else {
+          console.error(`Error: Season ${options.season} not found`);
+        }
         process.exit(2);
       }
     } else {
       season = await seasonService.getCurrentSeason(teamId);
 
       if (!season) {
-        console.error('Error: No current season found. Run "captain-stats init" first.');
+        if (options.json) {
+          console.log(JSON.stringify({ error: 'No current season found. Run "captain-stats init" first.' }));
+        } else {
+          console.error('Error: No current season found. Run "captain-stats init" first.');
+        }
         process.exit(3);
       }
     }
@@ -46,12 +54,17 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
       : await fixtureService.getUpcomingFixtures(season.id);
 
     if (fixtures.length === 0) {
-      console.error('No fixtures found');
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No fixtures found' }));
+      } else {
+        console.error('No fixtures found');
+      }
       process.exit(1);
     }
 
-    // Output
+    // Output - pure JSON or formatted table
     if (options.json) {
+      // Pure JSON output - no decorative characters
       console.log(formatFixturesJSON(season, fixtures));
     } else {
       console.log(formatFixturesTable(season, fixtures));
@@ -59,7 +72,12 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
 
     process.exit(0);
   } catch (error) {
-    console.error('Error:', error instanceof Error ? error.message : String(error));
+    // Database and other errors exit with code 3
+    if (options.json) {
+      console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    } else {
+      console.error('Error:', error instanceof Error ? error.message : String(error));
+    }
     process.exit(3);
   }
 }

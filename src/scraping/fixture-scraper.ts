@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import PQueue from 'p-queue';
 
 export interface Fixture {
   date: string; // ISO format YYYY-MM-DD
@@ -202,8 +203,6 @@ async function fetchWithRetry(
   maxRetries = 3,
   baseDelay = 1000
 ): Promise<string> {
-  let lastError: Error | undefined;
-
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await axios.get(url, {
@@ -216,9 +215,9 @@ async function fetchWithRetry(
 
       return response.data;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      const isLastAttempt = attempt === maxRetries - 1;
 
-      // Don't retry on client errors (4xx) or successful responses
+      // Don't retry on client errors (4xx) - throw immediately
       if (axios.isAxiosError(error) && error.response) {
         const status = error.response.status;
         if (status >= 400 && status < 500) {
@@ -226,9 +225,18 @@ async function fetchWithRetry(
         }
       }
 
-      // If this is the last attempt, throw
-      if (attempt === maxRetries - 1) {
-        break;
+      // If this is the last attempt, throw with detailed error message
+      if (isLastAttempt) {
+        if (axios.isAxiosError(error)) {
+          if (error.code === 'ECONNABORTED') {
+            throw new Error(`Timeout fetching fixtures from ${url}`);
+          }
+          if (error.response) {
+            throw new Error(`HTTP ${error.response.status} fetching fixtures from ${url}`);
+          }
+          throw new Error(`Network error fetching fixtures: ${error.message}`);
+        }
+        throw error instanceof Error ? error : new Error(String(error));
       }
 
       // Exponential backoff: 1s, 2s, 4s
@@ -238,47 +246,44 @@ async function fetchWithRetry(
     }
   }
 
-  // All retries failed
-  if (axios.isAxiosError(lastError)) {
-    if (lastError.code === 'ECONNABORTED') {
-      throw new Error(`Timeout fetching fixtures from ${url}`);
-    }
-    if (lastError.response) {
-      throw new Error(`HTTP ${lastError.response.status} fetching fixtures from ${url}`);
-    }
-    throw new Error(`Network error fetching fixtures: ${lastError.message}`);
-  }
-
-  throw lastError || new Error(`Failed to fetch fixtures from ${url}`);
+  // Should never reach here (all paths throw or return)
+  throw new Error(`Failed to fetch fixtures from ${url}`);
 }
 
 /**
- * Rate limiter for respectful scraping
+ * Global request queue with rate limiting for respectful scraping
+ *
+ * Uses p-queue to prevent concurrent requests from bypassing rate limits.
+ * - intervalCap: 5 requests
+ * - interval: 60000ms (1 minute)
+ * - carryoverConcurrencyCount: ensures strict rate limiting across intervals
  */
-class RateLimiter {
-  private lastRequestTime = 0;
-  private minInterval: number;
+const requestQueue = new PQueue({
+  intervalCap: 5,
+  interval: 60000,
+  carryoverConcurrencyCount: true,
+});
 
-  constructor(requestsPerMinute: number) {
-    // Convert requests per minute to milliseconds between requests
-    this.minInterval = (60 * 1000) / requestsPerMinute;
-  }
-
-  async wait(): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
-
-    if (timeSinceLastRequest < this.minInterval) {
-      const delay = this.minInterval - timeSinceLastRequest;
-      await sleep(delay);
-    }
-
-    this.lastRequestTime = Date.now();
-  }
+/**
+ * Scraper interface for dependency injection (test mocking)
+ */
+export interface IFixtureScraper {
+  fetchHtml(url: string): Promise<string>;
+  parseFixtures(html: string): Fixture[];
 }
 
-// Global rate limiter: 5 requests per minute (conservative)
-const globalRateLimiter = new RateLimiter(5);
+/**
+ * Default scraper implementation using real HTTP calls
+ */
+export class DefaultFixtureScraper implements IFixtureScraper {
+  async fetchHtml(url: string): Promise<string> {
+    return await requestQueue.add(() => fetchWithRetry(url, 3, 1000));
+  }
+
+  parseFixtures(html: string): Fixture[] {
+    return scrapeFixtures(html);
+  }
+}
 
 /**
  * Fetch and scrape fixtures from a club URL
@@ -290,13 +295,14 @@ export async function fetchFixtures(
   url: string,
   options: { skipRateLimit?: boolean } = {}
 ): Promise<Fixture[]> {
-  // Apply rate limiting unless explicitly skipped (for tests)
-  if (!options.skipRateLimit) {
-    await globalRateLimiter.wait();
-  }
+  let html: string;
 
-  // Fetch with retry logic
-  const html = await fetchWithRetry(url, 3, 1000);
+  // Apply rate limiting unless explicitly skipped (for tests)
+  if (options.skipRateLimit) {
+    html = await fetchWithRetry(url, 3, 1000);
+  } else {
+    html = await requestQueue.add(() => fetchWithRetry(url, 3, 1000));
+  }
 
   return scrapeFixtures(html);
 }

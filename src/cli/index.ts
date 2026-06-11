@@ -13,7 +13,6 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadEnvironmentConfig } from '../config/env.js';
 import { ConfigError } from '../utils/errors.js';
-import { formatError, printError } from './output/formatter.js';
 
 // Get current directory in ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -33,32 +32,22 @@ async function main(): Promise<void> {
     alias: { c: 'config', h: 'help', v: 'version' },
   });
 
-  // Load environment config early (before any other processing)
-  try {
-    loadEnvironmentConfig(parsed.config);
-  } catch (error) {
-    if (error instanceof ConfigError) {
-      printError(formatError(error));
-      process.exit(error.statusCode);
-    }
-    throw error; // Re-throw unexpected errors
-  }
-
-  // Handle version flag
+  // Handle version flag (before loading config)
   if (parsed.version) {
     console.log(`captain-stats v${VERSION}`);
-    process.exit(0);
-  }
-
-  // Handle help flag
-  if (parsed.help) {
-    console.log('Captain Stats - MAN v FAT Football team management tool');
     process.exit(0);
   }
 
   // Get command from positional arguments
   const command = parsed._[0];
 
+  // Handle global help flag only if no command specified
+  if (parsed.help && !command) {
+    console.log('Captain Stats - MAN v FAT Football team management tool');
+    process.exit(0);
+  }
+
+  // Show usage if no command (before loading config)
   if (!command) {
     console.log(`Captain Stats CLI v${VERSION}`);
     console.log('');
@@ -81,6 +70,20 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Load environment config (after help/version checks, but skip if command-level help requested)
+  if (!parsed.help) {
+    try {
+      loadEnvironmentConfig(parsed.config);
+    } catch (error) {
+      if (error instanceof ConfigError) {
+        // Output plain error message for configuration errors
+        console.error(`Configuration error: ${error.message}`);
+        process.exit(error.statusCode);
+      }
+      throw error; // Re-throw unexpected errors
+    }
+  }
+
   // Command routing
   switch (command) {
     case 'init': {
@@ -93,6 +96,21 @@ async function main(): Promise<void> {
     }
 
     case 'fixtures': {
+      // Handle command-specific help
+      if (parsed.help) {
+        console.log('Usage: captain-stats fixtures [options]');
+        console.log('');
+        console.log('View team fixtures');
+        console.log('');
+        console.log('Options:');
+        console.log('  --all              Show all fixtures (including completed)');
+        console.log('  --season <number>  Show fixtures for specific season');
+        console.log('  --json             Output in JSON format');
+        console.log('  --config <path>    Config file path');
+        console.log('  --help             Show this help message');
+        process.exit(0);
+      }
+
       const { fixturesCommand } = await import('./commands/fixtures.js');
       await fixturesCommand({
         all: parsed.all,
