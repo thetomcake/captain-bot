@@ -167,7 +167,12 @@
 
 **Goal**: Automatically post availability polls to WhatsApp after each game
 
-**Independent Test**: Can connect to WhatsApp, post poll for next fixture, track responses
+**Independent Test**: ⚠️ Manual — WhatsApp requires a real device for QR authentication; this story cannot be fully validated by the automated test suite alone. At the end of Phase 4, provide the user with the following manual validation steps:
+1. Run `captain-stats daemon --foreground`, scan the QR code with WhatsApp mobile app
+2. Verify "Connected to WhatsApp" message appears and auth state is persisted to database
+3. Run `captain-stats poll --dry-run` to verify poll formatting without posting
+4. Run `captain-stats poll` to post a live poll to the authorized group, confirm it appears on mobile
+5. Vote on the poll from a second WhatsApp account, run `captain-stats fixtures --json` to confirm response recorded
 
 ### Shared Utilities (Phase 4 prerequisite — extracted from scraper, reused by WhatsApp)
 
@@ -207,7 +212,7 @@
 - [ ] T063 [US2] Wire daemon command to CLI router in src/cli/index.ts
 - [ ] T064 [US2] Add validation and error handling for US2 commands
 
-**Checkpoint**: User Story 2 complete - polls can be posted and responses tracked independently
+**Checkpoint**: User Story 2 automated tests pass. Present the manual validation steps above to the user before marking Phase 4 complete — QR authentication and live poll posting must be verified on real hardware.
 
 ---
 
