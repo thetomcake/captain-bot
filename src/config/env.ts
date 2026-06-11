@@ -5,8 +5,8 @@
 import { config } from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import type { EnvironmentConfig } from '../types/config';
-import { ConfigError } from '../utils/errors';
+import type { EnvironmentConfig } from '../types/config.js';
+import { ConfigError } from '../utils/errors.js';
 
 /**
  * Validate and parse a required environment variable

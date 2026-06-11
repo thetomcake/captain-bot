@@ -1,11 +1,14 @@
 <!--
 SYNC IMPACT REPORT:
-Version: 0.0.0 → 1.0.0 (MAJOR: Initial constitution ratification)
+Version: 1.0.0 → 1.1.0 (MINOR: Added module system requirements to TypeScript principle)
 
-Modified Principles: None (initial creation)
-Added Sections:
-  - Core Principles (4 principles: CLI-First, Test-First, TypeScript, Security-First)
-  - Governance
+Modified Principles: 
+  - III. TypeScript - Added Module System Requirements subsection
+    * NodeNext module resolution mandate
+    * .js extension requirement for ESM imports
+    * Subpath imports requirement to avoid deep relative paths
+
+Added Sections: None
 
 Templates Status:
   ✅ plan-template.md - Constitution Check section confirmed compatible
@@ -44,8 +47,16 @@ coding begins and provides immediate feedback on correctness.
 All code MUST be written in TypeScript with strict type checking enabled.
 Type definitions MUST be complete and accurate.
 
+**Module System Requirements**:
+- Use NodeNext module resolution (`"module": "NodeNext"`, `"moduleResolution": "NodeNext"`)
+- All relative imports MUST include `.js` extensions (required by Node.js ESM)
+- Use subpath imports (`#src/database/*`, `#src/services/*`, etc.) to avoid deep relative paths (`../../../`)
+- Never use `../../../` style imports - use the `#src/` prefix (maps to `src/` root) defined in package.json
+
 **Rationale**: TypeScript catches errors at compile time, provides better tooling
-support, and serves as living documentation.
+support, and serves as living documentation. NodeNext ensures compatibility with
+modern Node.js ESM. Explicit extensions prevent runtime module resolution errors.
+Subpath imports improve maintainability and readability.
 
 ### IV. Security-First (NON-NEGOTIABLE)
 
@@ -77,4 +88,4 @@ MUST comply with these principles.
 alignment with these principles. Violations MUST be justified in a Complexity
 Tracking section.
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-09 | **Last Amended**: 2026-06-09
+**Version**: 1.1.0 | **Ratified**: 2026-06-09 | **Last Amended**: 2026-06-11

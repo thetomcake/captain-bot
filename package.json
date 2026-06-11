@@ -7,6 +7,9 @@
   "bin": {
     "captain-stats": "./dist/cli/index.js"
   },
+  "imports": {
+    "#src/*": "./dist/*"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",

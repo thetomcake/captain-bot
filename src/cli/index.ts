@@ -11,9 +11,9 @@ import minimist from 'minimist';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { loadEnvironmentConfig } from '../config/env';
-import { ConfigError } from '../utils/errors';
-import { formatError, printError } from './output/formatter';
+import { loadEnvironmentConfig } from '../config/env.js';
+import { ConfigError } from '../utils/errors.js';
+import { formatError, printError } from './output/formatter.js';
 
 // Get current directory in ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -81,8 +81,35 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Command routing (commands not yet implemented)
+  // Command routing
   switch (command) {
+    case 'init': {
+      const { initCommand } = await import('./commands/init.js');
+      await initCommand({
+        teamName: parsed['team-name'],
+        clubUrl: parsed['club-url'],
+      });
+      break;
+    }
+
+    case 'fixtures': {
+      const { fixturesCommand } = await import('./commands/fixtures.js');
+      await fixturesCommand({
+        all: parsed.all,
+        season: parsed.season ? parseInt(parsed.season) : undefined,
+        json: parsed.json,
+      });
+      break;
+    }
+
+    case 'sync': {
+      const { syncCommand } = await import('./commands/sync.js');
+      await syncCommand({
+        teamId: parsed['team-id'] ? parseInt(parsed['team-id']) : undefined,
+      });
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error('Run "captain-stats" to see available commands');

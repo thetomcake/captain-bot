@@ -1,5 +1,5 @@
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import { createDatabase, getDatabasePath } from './client';
+import { createDatabase, getDatabasePath } from './client.js';
 import path from 'path';
 
 /**

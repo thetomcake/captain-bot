@@ -25,6 +25,11 @@
 - Q: Who can run the tool - is it captain-only, or can players also install it? → A: Single server deployment using the operator's WhatsApp credentials; "captain" means the person running the tool (the admin/operator)
 - Q: What level of logging is needed for the daemon? → A: Verbose logging with timestamps for all operations (polls posted, messages processed, fixtures checked, errors) for full audit trail
 - Q: How should the system handle fixtures that are rescheduled after a poll has been posted? → A: Post new poll automatically with updated fixture details, mark old poll as superseded
+- Q: Test Isolation Strategy for External Dependencies - how should tests handle WhatsApp, web scraping, and database dependencies? → A: Real database (using test file), mocks for HTML scraping and WhatsApp API
+- Q: CI/CD Test Suite Performance Target - how fast should the full test suite run? → A: Under 10 seconds
+- Q: WhatsApp Message Edit/Delete Handling - what happens when a player edits or deletes a message containing captured stats? → A: Future messages override initial messages (within the 3-day window), message edits/deletes are ignored
+- Q: Multiple Players Claiming Same Goal / Partial Message Handling - what happens when multiple players claim goals, or a player sends stats across multiple messages? → A: No verification or conflict detection; accept partial messages and only update fields provided in each message (e.g., goals in one message, assists in another)
+- Q: WhatsApp Group Temporary Unavailability - how should the daemon handle temporary connection failures? → A: Log error and retry connection with exponential backoff (10s, 30s, 1m, 5m intervals)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -113,12 +118,12 @@ As a team captain, I need the system to automatically recognize when a new seaso
 
 - When the club website is unavailable during the daily 6 AM check, the system skips the check and retries at the next scheduled check 24 hours later (captain can trigger manual refresh if urgent)
 - When a fixture is rescheduled after a poll has been posted, the system automatically posts a new poll with updated fixture details and marks the old poll as superseded
-- What happens when a player edits or deletes a WhatsApp message containing stats?
-- How does the system handle ambiguous stat messages like "think I got 2" or "maybe assisted"?
-- What happens when multiple players claim the same goal?
-- How does the system handle players who leave the team mid-season?
-- What happens when the WhatsApp group becomes temporarily unavailable?
-- How does the system handle timezone differences between fixture times and poll posting?
+- When a player edits or deletes a WhatsApp message containing stats, the edit/delete is ignored; players can send a new message within the 3-day window to override their previous stats
+- How does the system handle ambiguous stat messages like "think I got 2" or "maybe assisted"? (Handled by FR-013: confidence scoring below 70% threshold results in no capture)
+- When multiple players each claim goals for the same game, all claims are accepted without verification; captain reviews and corrects totals manually via FR-019 if needed
+- How does the system handle players who leave the team mid-season? (Players remain in historical stats; no special handling needed for MVP as stats are per-game snapshots)
+- When the WhatsApp group becomes temporarily unavailable (network issues, service outage), the daemon logs the error and retries connection with exponential backoff (10s, 30s, 1m, 5m intervals) until connection is restored
+- How does the system handle timezone differences between fixture times and poll posting? (Defaulting to UK time per assumptions is sufficient for MVP as MAN v FAT Football is UK-based)
 
 ## Requirements *(mandatory)*
 
@@ -131,14 +136,15 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **FR-005**: System MUST detect season transitions when previously scraped fixtures are no longer present on the club website, automatically creating a new season while preserving previous season data
 - **FR-006**: System MUST authenticate with WhatsApp Web API using QR code scan on first run, with session credentials stored in database (scoped by team and season) to avoid re-authentication on subsequent runs
 - **FR-007**: System MUST monitor exactly one explicitly-authorized WhatsApp group and MUST NOT access any other group or chat
+- **FR-007a**: When WhatsApp connection fails (network issues, service outage, phone offline), system MUST log the error with timestamp and retry connection with exponential backoff (10s, 30s, 1m, 5m intervals) until connection is restored; no manual restart required
 - **FR-008**: System MUST post an availability poll for the next fixture on the day after each game (e.g., Monday game → Tuesday poll)
 - **FR-009**: System MUST record each WhatsApp user's poll response
 - **FR-010**: System MUST interpret natural-language messages to capture per-player stats: goals, assists, weight direction (`up`/`down`/`same`/`unknown`), and food tracking (`yes`/`no`)
 - **FR-011**: System MUST handle various natural-language expressions for goals and assists (e.g., "scored", "2 goals", "got one", "assisted")
 - **FR-012**: System MUST attempt stat capture only during the 3-day window following a game; messages outside this window are treated as ordinary chat
 - **FR-013**: System MUST be conservative in stat capture, using confidence scoring (0-100%) and only capturing stats when confidence exceeds 70%, and MUST NOT over-interpret general chat
-- **FR-014**: System MUST attribute captured stats to the WhatsApp user who sent the message, linked to the relevant game
-- **FR-015**: System MUST apply defaults when values are not explicitly stated: goals=0, assists=0, weight=unknown, tracking=no
+- **FR-014**: System MUST attribute captured stats to the WhatsApp user who sent the message, linked to the relevant game; the system accepts partial messages and only updates the specific fields mentioned (e.g., a player can send "2 goals" in one message and "1 assist" in another); multiple messages from the same player within the 3-day window merge/update their stats for that game (message edits/deletes are ignored)
+- **FR-015**: System MUST apply defaults only for initial stat capture when values are not explicitly stated: goals=0, assists=0, weight=unknown, tracking=no; subsequent partial messages update only the fields mentioned without resetting other fields to defaults
 - **FR-016**: System MUST capture weight as direction only (`up`/`down`/`same`/`unknown`) and MUST NOT capture weight values, BMI, or other health data
 - **FR-017**: System MUST store captured stats and poll responses in a database, retained per season
 - **FR-018**: Captain MUST be able to view recorded stats for any game in current or previous seasons
@@ -169,6 +175,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **SC-007**: System maintains 99.9% data integrity across multiple seasons (no loss of historical stats or poll responses)
 - **SC-008**: Poll response capture rate is 100% (every response is recorded)
 - **SC-009**: System reduces captain's manual stat tracking time by at least 70% compared to manual spreadsheet entry
+- **SC-010**: Full test suite completes in under 10 seconds to enable rapid TDD cycles and fast CI/CD feedback
 
 ## Assumptions
 
@@ -189,3 +196,4 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - Database storage can scale to handle multiple seasons of data for a single team (estimated: 20-30 games per season, 10-15 players per team, 5+ seasons)
 - The captain uses the system regularly enough to catch and correct any stat capture errors
 - Timezone handling can default to UK time since MAN v FAT Football is UK-based
+- Tests use real database (test file) for accurate behavior validation, with mocked HTML scraping and WhatsApp API for fast execution without external network dependencies
