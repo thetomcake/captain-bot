@@ -85,7 +85,7 @@
 - [ ] T023 [P] [US1] Create fixture scraper unit tests in tests/unit/scrapers/fixture-scraper.test.ts (static HTML parsing with axios + cheerio; tests must validate extraction of date, time, opponent, venue per FR-002)
 - [ ] T024 [P] [US1] Create fixture service integration tests in tests/integration/fixtures/fixture-retrieval.test.ts (end-to-end scraping, caching, error handling)
 - [ ] T025 [P] [US1] Create CLI fixtures command contract tests in tests/integration/cli/fixtures-command.test.ts (output formats, exit codes per cli-interface.md)
-- [ ] T026 [P] [US1] Create sample HTML fixtures in tests/fixtures/html/manvfat-fixtures.html
+- [ ] T026 [P] [US1] Fetch and save live HTML from manvfatfootball.com/club/watford/ to tests/fixtures/html/manvfat-fixtures.html (capture actual page structure for realistic scraper testing)
 - [ ] T027 [US1] Verify static scraping can extract all FR-002 required fields (date, time, opponent, venue) from live manvfatfootball.com club page HTML (document CSS selectors and extraction strategy)
 
 ### Implementation for User Story 1
