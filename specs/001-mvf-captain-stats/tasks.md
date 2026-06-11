@@ -82,41 +82,47 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T023 [P] [US1] Create fixture scraper unit tests in tests/unit/scrapers/fixture-scraper.test.ts (static HTML parsing, selector fallback)
+- [ ] T023 [P] [US1] Create fixture scraper unit tests in tests/unit/scrapers/fixture-scraper.test.ts (static HTML parsing with axios + cheerio; tests must validate extraction of date, time, opponent, venue per FR-002)
 - [ ] T024 [P] [US1] Create fixture service integration tests in tests/integration/fixtures/fixture-retrieval.test.ts (end-to-end scraping, caching, error handling)
 - [ ] T025 [P] [US1] Create CLI fixtures command contract tests in tests/integration/cli/fixtures-command.test.ts (output formats, exit codes per cli-interface.md)
 - [ ] T026 [P] [US1] Create sample HTML fixtures in tests/fixtures/html/manvfat-fixtures.html
+- [ ] T027 [US1] Verify static scraping can extract all FR-002 required fields (date, time, opponent, venue) from live manvfatfootball.com club page HTML (document CSS selectors and extraction strategy)
 
 ### Implementation for User Story 1
 
 #### Scraping Layer
 
-- [ ] T027 [P] [US1] Implement static scraper in src/scraping/static-scraper.ts using axios + cheerio per research.md
-- [ ] T028 [P] [US1] Implement dynamic scraper fallback in src/scraping/dynamic-scraper.ts using playwright per research.md
-- [ ] T029 [US1] Create fixture scraper coordinator in src/scraping/fixture-scraper.ts (tries static first, falls back to dynamic)
-- [ ] T030 [US1] Add retry logic and rate limiting to scraper per research.md error handling patterns
+- [ ] T028 [US1] Implement fixture scraper in src/scraping/fixture-scraper.ts using axios + cheerio for static HTML parsing per research.md
+- [ ] T029 [US1] Add retry logic and rate limiting to scraper per research.md error handling patterns
 
 #### Service Layer
 
-- [ ] T031 [US1] Implement FixtureService in src/services/fixture-service.ts (scrape, cache, detect changes per data-model.md)
-- [ ] T032 [US1] Implement SeasonService in src/services/season-service.ts (get/create current season, season boundary detection per research.md)
-- [ ] T033 [US1] Add fixture database operations: insert, update, query by season
+- [ ] T030 [US1] Implement FixtureService in src/services/fixture-service.ts (scrape, cache, detect changes per data-model.md)
+- [ ] T031 [US1] Implement SeasonService in src/services/season-service.ts (get/create current season, season boundary detection per research.md)
+- [ ] T032 [US1] Add fixture database operations: insert, update, query by season
+
+#### Fixture Change Detection (FR-021)
+
+- [ ] T033 [US1] Implement fixture change detection in FixtureService (compare scraped fixtures to stored games, detect date/time/venue changes per FR-021)
+- [ ] T034 [US1] Add delete poll + responses database operations (cascade delete poll and all poll_responses for a given fixture when rescheduled)
+- [ ] T035 [US1] Add automatic re-poll posting when fixture rescheduled (delete old poll records, trigger new poll creation per FR-021)
+- [ ] T036 [US1] Add logging for fixture rescheduling events (old values, new values, poll deletion/recreation per quickstart.md)
 
 #### CLI Commands
 
-- [ ] T034 [US1] Implement `captain-stats fixtures` command in src/cli/commands/fixtures.ts per cli-interface.md
-- [ ] T035 [US1] Implement `captain-stats sync` command in src/cli/commands/sync.ts per cli-interface.md
-- [ ] T036 [US1] Implement `captain-stats init` command in src/cli/commands/init.ts per cli-interface.md
-- [ ] T037 [US1] Add table output formatter in src/cli/output/table.ts for fixtures display
-- [ ] T038 [US1] Add JSON output formatter in src/cli/output/json.ts for fixtures data
+- [ ] T037 [US1] Implement `captain-stats fixtures` command in src/cli/commands/fixtures.ts per cli-interface.md
+- [ ] T038 [US1] Implement `captain-stats sync` command in src/cli/commands/sync.ts per cli-interface.md
+- [ ] T039 [US1] Implement `captain-stats init` command in src/cli/commands/init.ts per cli-interface.md
+- [ ] T040 [US1] Add table output formatter in src/cli/output/table.ts for fixtures display
+- [ ] T041 [US1] Add JSON output formatter in src/cli/output/json.ts for fixtures data
 
 #### Integration
 
-- [ ] T039 [US1] Wire fixtures command to CLI router in src/cli/index.ts
-- [ ] T040 [US1] Wire sync command to CLI router in src/cli/index.ts
-- [ ] T041 [US1] Wire init command to CLI router in src/cli/index.ts
-- [ ] T042 [US1] Add validation and error handling for all US1 commands
-- [ ] T043 [US1] Add logging for fixture operations (scrape, sync, display)
+- [ ] T042 [US1] Wire fixtures command to CLI router in src/cli/index.ts
+- [ ] T043 [US1] Wire sync command to CLI router in src/cli/index.ts
+- [ ] T044 [US1] Wire init command to CLI router in src/cli/index.ts
+- [ ] T045 [US1] Add validation and error handling for all US1 commands
+- [ ] T046 [US1] Add logging for fixture operations (scrape, sync, display)
 
 **Checkpoint**: User Story 1 complete - fixtures can be viewed and synced independently
 
@@ -130,35 +136,35 @@
 
 ### Tests for User Story 2 (Test-First)
 
-- [ ] T044 [P] [US2] Create WhatsApp client unit tests in tests/unit/whatsapp/client.test.ts (connection, auth state, mocked Baileys)
-- [ ] T045 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking)
-- [ ] T046 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with test group)
-- [ ] T047 [P] [US2] Create CLI poll command contract tests in tests/integration/cli/poll-command.test.ts per cli-interface.md
+- [ ] T047 [P] [US2] Create WhatsApp client unit tests in tests/unit/whatsapp/client.test.ts (connection, auth state, mocked Baileys)
+- [ ] T048 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking)
+- [ ] T049 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with test group)
+- [ ] T050 [P] [US2] Create CLI poll command contract tests in tests/integration/cli/poll-command.test.ts per cli-interface.md
 
 ### Implementation for User Story 2
 
 #### WhatsApp Integration
 
-- [ ] T048 [US2] Implement database-backed auth state in src/whatsapp/auth.ts per research.md (BufferJSON serialization, Drizzle storage)
-- [ ] T049 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management per research.md)
-- [ ] T050 [US2] Implement poll manager in src/whatsapp/poll-manager.ts (create polls, format messages, post to group per research.md poll pattern)
-- [ ] T051 [US2] Implement message handler in src/whatsapp/message-handler.ts (group filtering, poll response capture per research.md)
-- [ ] T052 [US2] Add rate limiting to WhatsApp operations per research.md (1 msg/12 seconds = 5 msg/minute)
+- [ ] T051 [US2] Implement database-backed auth state in src/whatsapp/auth.ts per research.md (BufferJSON serialization, Drizzle storage)
+- [ ] T052 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management per research.md)
+- [ ] T053 [US2] Implement poll manager in src/whatsapp/poll-manager.ts (create polls, format messages, post to group per research.md poll pattern)
+- [ ] T054 [US2] Implement message handler in src/whatsapp/message-handler.ts (group filtering, poll response capture per research.md)
+- [ ] T055 [US2] Add rate limiting to WhatsApp operations per research.md (1 msg/12 seconds = 5 msg/minute)
 
 #### Service Layer
 
-- [ ] T053 [US2] Implement PollService in src/services/poll-service.ts (schedule poll, post poll, track responses)
-- [ ] T054 [US2] Add poll database operations: insert poll record, upsert poll responses per data-model.md
-- [ ] T055 [US2] Add WhatsApp user database operations: create/update users from JID per data-model.md
+- [ ] T056 [US2] Implement PollService in src/services/poll-service.ts (schedule poll, post poll, track responses)
+- [ ] T057 [US2] Add poll database operations: insert poll record, upsert poll responses per data-model.md
+- [ ] T058 [US2] Add WhatsApp user database operations: create/update users from JID per data-model.md
 
 #### CLI and Daemon
 
-- [ ] T056 [US2] Implement `captain-stats poll` command in src/cli/commands/poll.ts per cli-interface.md
-- [ ] T057 [US2] Implement daemon mode in src/cli/commands/daemon.ts (WhatsApp connection, message monitoring, graceful shutdown per research.md)
-- [ ] T058 [US2] Add scheduled poll posting logic (day after game completion) using Croner per research.md
-- [ ] T059 [US2] Wire poll command to CLI router in src/cli/index.ts
-- [ ] T060 [US2] Wire daemon command to CLI router in src/cli/index.ts
-- [ ] T061 [US2] Add validation and error handling for US2 commands
+- [ ] T059 [US2] Implement `captain-stats poll` command in src/cli/commands/poll.ts per cli-interface.md
+- [ ] T060 [US2] Implement daemon mode in src/cli/commands/daemon.ts (WhatsApp connection, message monitoring, graceful shutdown per research.md)
+- [ ] T061 [US2] Add scheduled poll posting logic (day after game completion) using Croner per research.md
+- [ ] T062 [US2] Wire poll command to CLI router in src/cli/index.ts
+- [ ] T063 [US2] Wire daemon command to CLI router in src/cli/index.ts
+- [ ] T064 [US2] Add validation and error handling for US2 commands
 
 **Checkpoint**: User Story 2 complete - polls can be posted and responses tracked independently
 
@@ -172,30 +178,30 @@
 
 ### Tests for User Story 3 (Test-First)
 
-- [ ] T062 [P] [US3] Create parser service unit tests in tests/unit/services/parser-service.test.ts (pattern matching, confidence scoring, ambiguity handling per research.md)
-- [ ] T063 [P] [US3] Create stat service unit tests in tests/unit/services/stat-service.test.ts (capture window logic, defaults, deduplication)
-- [ ] T064 [P] [US3] Create stat capture integration tests in tests/integration/whatsapp/stat-capture.test.ts (end-to-end message→stat flow)
-- [ ] T065 [P] [US3] Create test message fixtures in tests/fixtures/messages/ (clear stats, ambiguous, edge cases)
+- [ ] T065 [P] [US3] Create parser service unit tests in tests/unit/services/parser-service.test.ts (pattern matching, confidence scoring, ambiguity handling per research.md)
+- [ ] T066 [P] [US3] Create stat service unit tests in tests/unit/services/stat-service.test.ts (capture window logic, defaults, deduplication)
+- [ ] T067 [P] [US3] Create stat capture integration tests in tests/integration/whatsapp/stat-capture.test.ts (end-to-end message→stat flow)
+- [ ] T068 [P] [US3] Create test message fixtures in tests/fixtures/messages/ (clear stats, ambiguous, edge cases)
 
 ### Implementation for User Story 3
 
 #### Parsing Layer
 
-- [ ] T066 [P] [US3] Implement pattern definitions in src/services/parser/patterns.ts (goals, assists, weight, food regex patterns per research.md)
-- [ ] T067 [US3] Implement confidence scorer in src/services/parser/confidence.ts (multi-signal scoring per research.md)
-- [ ] T068 [US3] Implement ParserService in src/services/parser-service.ts (extract stats, calculate confidence, handle ambiguity per research.md)
+- [ ] T069 [P] [US3] Implement pattern definitions in src/services/parser/patterns.ts (goals, assists, weight, food regex patterns per research.md)
+- [ ] T070 [US3] Implement confidence scorer in src/services/parser/confidence.ts (multi-signal scoring per research.md)
+- [ ] T071 [US3] Implement ParserService in src/services/parser-service.ts (extract stats, calculate confidence, handle ambiguity per research.md)
 
 #### Service Layer
 
-- [ ] T069 [US3] Implement StatService in src/services/stat-service.ts (capture window validation, stat storage, defaults per data-model.md)
-- [ ] T070 [US3] Add stat database operations: upsert stat record (last message wins for same user+game per data-model.md)
-- [ ] T071 [US3] Integrate stat capture into message handler in src/whatsapp/message-handler.ts (parse→validate→store flow)
+- [ ] T072 [US3] Implement StatService in src/services/stat-service.ts (capture window validation, stat storage, defaults per data-model.md)
+- [ ] T073 [US3] Add stat database operations: upsert stat record (last message wins for same user+game per data-model.md)
+- [ ] T074 [US3] Integrate stat capture into message handler in src/whatsapp/message-handler.ts (parse→validate→store flow)
 
 #### Game Status Management
 
-- [ ] T072 [US3] Add game status transitions in FixtureService (mark completed, track 3-day capture window per data-model.md)
-- [ ] T073 [US3] Add automatic game completion detection in daemon (game date passes → status=completed)
-- [ ] T074 [US3] Add logging for stat capture events (message parsed, confidence score, captured/rejected per quickstart.md)
+- [ ] T075 [US3] Add game status transitions in FixtureService (mark completed, track 3-day capture window per data-model.md)
+- [ ] T076 [US3] Add automatic game completion detection in daemon (game date passes → status=completed)
+- [ ] T077 [US3] Add logging for stat capture events (message parsed, confidence score, captured/rejected per quickstart.md)
 
 **Checkpoint**: User Story 3 complete - stats captured automatically from messages with confidence scoring
 
@@ -209,28 +215,28 @@
 
 ### Tests for User Story 4 (Test-First)
 
-- [ ] T075 [P] [US4] Create stats view unit tests in tests/unit/services/stat-service-view.test.ts (query by game, by season, formatting)
-- [ ] T076 [P] [US4] Create stats edit unit tests in tests/unit/services/stat-service-edit.test.ts (validation, manually_edited flag, notes)
-- [ ] T077 [P] [US4] Create CLI stats command contract tests in tests/integration/cli/stats-command.test.ts per cli-interface.md
+- [ ] T078 [P] [US4] Create stats view unit tests in tests/unit/services/stat-service-view.test.ts (query by game, by season, formatting)
+- [ ] T079 [P] [US4] Create stats edit unit tests in tests/unit/services/stat-service-edit.test.ts (validation, manually_edited flag, notes)
+- [ ] T080 [P] [US4] Create CLI stats command contract tests in tests/integration/cli/stats-command.test.ts per cli-interface.md
 
 ### Implementation for User Story 4
 
 #### Service Layer
 
-- [ ] T078 [US4] Extend StatService with view operations (get by game, get by season, get by user per data-model.md)
-- [ ] T079 [US4] Extend StatService with edit operations (update stat, set manually_edited flag, add notes per data-model.md)
-- [ ] T080 [US4] Add stat validation logic (goals/assists ≥0, valid weight direction enum per data-model.md)
+- [ ] T081 [US4] Extend StatService with view operations (get by game, get by season, get by user per data-model.md)
+- [ ] T082 [US4] Extend StatService with edit operations (update stat, set manually_edited flag, add notes per data-model.md)
+- [ ] T083 [US4] Add stat validation logic (goals/assists ≥0, valid weight direction enum per data-model.md)
 
 #### CLI Commands
 
-- [ ] T081 [US4] Implement `captain-stats stats <game-id>` command in src/cli/commands/stats.ts per cli-interface.md
-- [ ] T082 [US4] Add interactive edit mode for stats command (--edit flag per cli-interface.md)
-- [ ] T083 [US4] Add direct edit mode for stats command (--set flag per cli-interface.md)
-- [ ] T084 [US4] Implement `captain-stats seasons` command in src/cli/commands/seasons.ts per cli-interface.md
-- [ ] T085 [US4] Add stat table formatter in src/cli/output/table.ts (player stats grid per cli-interface.md)
-- [ ] T086 [US4] Wire stats command to CLI router in src/cli/index.ts
-- [ ] T087 [US4] Wire seasons command to CLI router in src/cli/index.ts
-- [ ] T088 [US4] Add validation and error handling for US4 commands
+- [ ] T084 [US4] Implement `captain-stats stats <game-id>` command in src/cli/commands/stats.ts per cli-interface.md
+- [ ] T085 [US4] Add interactive edit mode for stats command (--edit flag per cli-interface.md)
+- [ ] T086 [US4] Add direct edit mode for stats command (--set flag per cli-interface.md)
+- [ ] T087 [US4] Implement `captain-stats seasons` command in src/cli/commands/seasons.ts per cli-interface.md
+- [ ] T088 [US4] Add stat table formatter in src/cli/output/table.ts (player stats grid per cli-interface.md)
+- [ ] T089 [US4] Wire stats command to CLI router in src/cli/index.ts
+- [ ] T090 [US4] Wire seasons command to CLI router in src/cli/index.ts
+- [ ] T091 [US4] Add validation and error handling for US4 commands
 
 **Checkpoint**: User Story 4 complete - historical stats viewable and editable independently
 
@@ -244,24 +250,24 @@
 
 ### Tests for User Story 5 (Test-First)
 
-- [ ] T089 [P] [US5] Create season detection unit tests in tests/unit/services/season-detection.test.ts (signal detection, confidence scoring per research.md)
-- [ ] T090 [P] [US5] Create season transition integration tests in tests/integration/seasons/transition.test.ts (full transition flow, data integrity)
-- [ ] T091 [P] [US5] Create test fixtures for season scenarios in tests/fixtures/data/ (old season data, new season data)
+- [ ] T092 [P] [US5] Create season detection unit tests in tests/unit/services/season-detection.test.ts (signal detection, confidence scoring per research.md)
+- [ ] T093 [P] [US5] Create season transition integration tests in tests/integration/seasons/transition.test.ts (full transition flow, data integrity)
+- [ ] T094 [P] [US5] Create test fixtures for season scenarios in tests/fixtures/data/ (old season data, new season data)
 
 ### Implementation for User Story 5
 
 #### Detection Logic
 
-- [ ] T092 [US5] Implement season detection signals in src/services/season/detection.ts (mass disappearance, temporal gap, new patterns per research.md)
-- [ ] T093 [US5] Implement season transition confidence scorer in src/services/season/confidence.ts (multi-signal weighted scoring per research.md)
-- [ ] T094 [US5] Extend SeasonService with transition logic (detect, archive old, create new per research.md)
+- [ ] T095 [US5] Implement season detection signals in src/services/season/detection.ts (mass disappearance, temporal gap, new patterns per research.md)
+- [ ] T096 [US5] Implement season transition confidence scorer in src/services/season/confidence.ts (multi-signal weighted scoring per research.md)
+- [ ] T097 [US5] Extend SeasonService with transition logic (detect, archive old, create new per research.md)
 
 #### Data Migration
 
-- [ ] T095 [US5] Implement season archival in SeasonService (set end_date, is_current=false per data-model.md)
-- [ ] T096 [US5] Add season data integrity checks (no fixture loss, no cross-season contamination per spec.md SC-006/SC-007)
-- [ ] T097 [US5] Integrate season detection into sync operation (check on each fixture sync)
-- [ ] T098 [US5] Add logging for season transitions (confidence score, triggering signals per research.md)
+- [ ] T098 [US5] Implement season archival in SeasonService (set end_date, is_current=false per data-model.md)
+- [ ] T099 [US5] Add season data integrity checks (no fixture loss, no cross-season contamination per spec.md SC-006/SC-007)
+- [ ] T100 [US5] Integrate season detection into sync operation (check on each fixture sync)
+- [ ] T101 [US5] Add logging for season transitions (confidence score, triggering signals per research.md)
 
 **Checkpoint**: User Story 5 complete - season transitions handled automatically with data preservation
 
@@ -273,45 +279,45 @@
 
 ### Testing & Quality
 
-- [ ] T099 [P] Add end-to-end validation suite from quickstart.md scenarios
-- [ ] T100 [P] Add property-based tests for parsers using fast-check per research.md
-- [ ] T101 [P] Verify test coverage >80% per quickstart.md targets
-- [ ] T102 [P] Add performance tests (fixture retrieval <5s, queries <100ms per spec.md SC-001/SC-005)
+- [ ] T102 [P] Add end-to-end validation suite from quickstart.md scenarios
+- [ ] T103 [P] Add property-based tests for parsers using fast-check per research.md
+- [ ] T104 [P] Verify test coverage >80% per quickstart.md targets
+- [ ] T105 [P] Add performance tests (fixture retrieval <5s, queries <100ms per spec.md SC-001/SC-005)
 
 ### Documentation
 
-- [ ] T103 [P] Create README.md with installation, configuration, usage
-- [ ] T104 [P] Add JSDoc comments to public APIs
-- [ ] T105 [P] Create CONTRIBUTING.md with development workflow
-- [ ] T106 [P] Add inline code documentation for complex algorithms (season detection, confidence scoring)
+- [ ] T106 [P] Create README.md with installation, configuration, usage
+- [ ] T107 [P] Add JSDoc comments to public APIs
+- [ ] T108 [P] Create CONTRIBUTING.md with development workflow
+- [ ] T109 [P] Add inline code documentation for complex algorithms (season detection, confidence scoring)
 
 ### Security & Production Readiness
 
-- [ ] T107 [P] Add input validation across all CLI commands (prevent injection per constitution principle IV)
-- [ ] T108 [P] Add file permission checks on startup (database 600, config 400, auth 700 per cli-interface.md)
-- [ ] T109 [P] Review all external inputs for vulnerabilities (club URL, WhatsApp messages, env vars)
-- [ ] T110 [P] Add rate limit protection for scraping (respectful crawling per research.md)
+- [ ] T110 [P] Add input validation across all CLI commands (prevent injection per constitution principle IV)
+- [ ] T111 [P] Add file permission checks on startup (database 600, config 400, auth 700 per cli-interface.md)
+- [ ] T112 [P] Review all external inputs for vulnerabilities (club URL, WhatsApp messages, env vars)
+- [ ] T113 [P] Add rate limit protection for scraping (respectful crawling per research.md)
 
 ### Developer Experience
 
-- [ ] T111 [P] Add development mode with hot reload
-- [ ] T112 [P] Add database seeding script for local development
-- [ ] T113 [P] Add mock WhatsApp mode for testing without real connection
-- [ ] T114 [P] Create troubleshooting guide in docs/
+- [ ] T114 [P] Add development mode with hot reload
+- [ ] T115 [P] Add database seeding script for local development
+- [ ] T116 [P] Add mock WhatsApp mode for testing without real connection
+- [ ] T117 [P] Create troubleshooting guide in docs/
 
 ### Deployment & Operations
 
-- [ ] T115 [P] Add graceful shutdown handling in daemon (SIGTERM/SIGINT per cli-interface.md)
-- [ ] T116 [P] Add health check endpoint/command for monitoring
-- [ ] T117 [P] Add log rotation configuration
-- [ ] T118 [P] Create systemd service file example for daemon mode
+- [ ] T118 [P] Add graceful shutdown handling in daemon (SIGTERM/SIGINT per cli-interface.md)
+- [ ] T119 [P] Add health check endpoint/command for monitoring
+- [ ] T120 [P] Add log rotation configuration
+- [ ] T121 [P] Create systemd service file example for daemon mode
 
 ### Final Validation
 
-- [ ] T119 Run all quickstart.md validation scenarios (1-10)
-- [ ] T120 Verify all success criteria from spec.md (SC-001 through SC-009)
-- [ ] T121 Run full test suite with coverage report
-- [ ] T122 Security audit: review for OWASP Top 10 vulnerabilities
+- [ ] T122 Run all quickstart.md validation scenarios (1-10)
+- [ ] T123 Verify all success criteria from spec.md (SC-001 through SC-009)
+- [ ] T124 Run full test suite with coverage report
+- [ ] T125 Security audit: review for OWASP Top 10 vulnerabilities
 
 ---
 
@@ -439,17 +445,17 @@ With 3+ developers:
 
 - **Phase 1 (Setup)**: 10 tasks
 - **Phase 2 (Foundational)**: 12 tasks
-- **Phase 3 (US1 - Fixtures)**: 21 tasks (4 tests + 17 implementation)
+- **Phase 3 (US1 - Fixtures)**: 23 tasks (4 tests + 1 validation + 14 implementation + 4 FR-021)
 - **Phase 4 (US2 - Polls)**: 18 tasks (4 tests + 14 implementation)
 - **Phase 5 (US3 - Stats)**: 13 tasks (4 tests + 9 implementation)
 - **Phase 6 (US4 - View/Edit)**: 14 tasks (3 tests + 11 implementation)
 - **Phase 7 (US5 - Seasons)**: 10 tasks (3 tests + 7 implementation)
 - **Phase 8 (Polish)**: 24 tasks
 
-**Total**: 122 tasks
+**Total**: 124 tasks
 
 **By User Story**:
-- US1: 21 tasks (MVP scope)
+- US1: 23 tasks (MVP scope - includes FR-021 fixture rescheduling)
 - US2: 18 tasks
 - US3: 13 tasks
 - US4: 14 tasks
@@ -457,7 +463,7 @@ With 3+ developers:
 - Foundation: 22 tasks
 - Polish: 24 tasks
 
-**Suggested MVP Scope**: Phase 1 + Phase 2 + Phase 3 = 43 tasks (US1 only)
+**Suggested MVP Scope**: Phase 1 + Phase 2 + Phase 3 = 45 tasks (US1 only)
 
 ---
 

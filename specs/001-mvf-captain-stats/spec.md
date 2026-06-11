@@ -172,7 +172,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 
 ## Assumptions
 
-- The MAN v FAT Football website structure remains consistent enough to scrape fixture information reliably with static HTML parsing (no JavaScript rendering required for MVP; dynamic scraping can be added later if needed)
+- The MAN v FAT Football website structure remains consistent enough to scrape fixture information reliably with static HTML parsing using Axios + Cheerio (no JavaScript rendering required; Playwright-based dynamic scraping is explicitly excluded from MVP per 2026-06-11 clarification and will be evaluated for future releases only if static scraping proves insufficient)
 - WhatsApp Web API (Baileys library) provides stable QR code authentication with persistent encrypted session support
 - The tool runs on a server as a single deployment instance using the operator's (captain's) WhatsApp credentials; operator has physical access to their phone for initial QR code scan authentication
 - Players use the authorized WhatsApp group for team communication and stat reporting

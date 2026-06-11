@@ -8,7 +8,7 @@
 
 ## Summary
 
-A CLI tool to automate MAN v FAT Football team management by fetching fixtures from club websites, posting availability polls to WhatsApp after each game, capturing player stats from natural language messages within 3 days post-game, and maintaining historical data across multiple seasons. Built with TypeScript (strict mode), Baileys WhatsApp library, Drizzle ORM with SQLite (swappable to other SQL databases), and Axios/Cheerio/Playwright for web scraping.
+A CLI tool to automate MAN v FAT Football team management by fetching fixtures from club websites, posting availability polls to WhatsApp after each game, capturing player stats from natural language messages within 3 days post-game, and maintaining historical data across multiple seasons. Built with TypeScript (strict mode), Baileys WhatsApp library, Drizzle ORM with SQLite (swappable to other SQL databases), and Axios/Cheerio for static web scraping.
 
 ## Technical Context
 
@@ -19,10 +19,9 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 - drizzle-orm + drizzle-kit (type-safe ORM with migrations)
 - better-sqlite3 (SQLite driver for Node.js)
 - axios + cheerio (static HTML scraping)
-- playwright (fallback for dynamic content)
 - minimist (argv parsing for CLI)
 
-**Dependency Philosophy**: Minimize infrastructure dependencies for supply chain security and transparency. Use libraries for domain-specific complexity (WhatsApp protocol → Baileys, SQL type safety → Drizzle, web scraping → Playwright), not for thin wrappers over Node.js APIs (logging, CLI routing, formatting). Custom implementations (~400 lines total) provide full control without the maintenance burden of 100+ transitive dependencies.
+**Dependency Philosophy**: Minimize infrastructure dependencies for supply chain security and transparency. Use libraries for domain-specific complexity (WhatsApp protocol → Baileys, SQL type safety → Drizzle, HTML parsing → Cheerio), not for thin wrappers over Node.js APIs (logging, CLI routing, formatting). Custom implementations (~400 lines total) provide full control without the maintenance burden of 100+ transitive dependencies.
 
 **Storage**: SQLite (development/production), with database abstraction via Drizzle ORM to support PostgreSQL, MySQL, or other SQL databases in future
 
@@ -127,9 +126,7 @@ src/
 │   ├── migrations/       # Auto-generated migration files
 │   └── client.ts         # Database connection setup
 ├── scraping/
-│   ├── fixture-scraper.ts # Club website scraping logic
-│   ├── static-scraper.ts  # Axios + Cheerio implementation
-│   └── dynamic-scraper.ts # Playwright fallback
+│   └── fixture-scraper.ts # Club website scraping logic (Axios + Cheerio)
 ├── whatsapp/
 │   ├── client.ts         # Baileys WhatsApp client wrapper
 │   ├── auth.ts           # Custom auth state management
