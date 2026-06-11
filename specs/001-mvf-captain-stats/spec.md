@@ -30,6 +30,8 @@
 - Q: WhatsApp Message Edit/Delete Handling - what happens when a player edits or deletes a message containing captured stats? → A: Future messages override initial messages (within the 3-day window), message edits/deletes are ignored
 - Q: Multiple Players Claiming Same Goal / Partial Message Handling - what happens when multiple players claim goals, or a player sends stats across multiple messages? → A: No verification or conflict detection; accept partial messages and only update fields provided in each message (e.g., goals in one message, assists in another)
 - Q: WhatsApp Group Temporary Unavailability - how should the daemon handle temporary connection failures? → A: Log error and retry connection with exponential backoff (10s, 30s, 1m, 5m intervals)
+- Q: How should Phase 4 WhatsApp tests mock external dependencies? → A: Mock at IWhatsAppClient service boundary only (MockWhatsAppClient); no vi.mock('@whiskeysockets/baileys') anywhere — consistent with service-boundary mocking philosophy; client.ts internals are not unit-tested (QR auth is interactive)
+- Q: Should retry and rate-limiting logic be shared across integrations? → A: Two focused utilities — src/utils/retry.ts (exponential backoff) and src/utils/rate-limiter.ts (throttling) — shared by both the fixture scraper and WhatsApp integrations to avoid duplication
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -196,4 +198,5 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - Database storage can scale to handle multiple seasons of data for a single team (estimated: 20-30 games per season, 10-15 players per team, 5+ seasons)
 - The captain uses the system regularly enough to catch and correct any stat capture errors
 - Timezone handling can default to UK time since MAN v FAT Football is UK-based
-- Tests use real database (test file) for accurate behavior validation, with mocked HTML scraping and WhatsApp API for fast execution without external network dependencies
+- Tests use real database (`:memory:`) for accurate behavior validation; external dependencies are mocked at service boundaries only — MockFixtureScraper (implements IFixtureScraper) for scraping and MockWhatsAppClient (implements IWhatsAppClient) for WhatsApp; no vi.mock of library internals (axios, cheerio, Baileys) anywhere in the test suite
+- Retry (exponential backoff) and rate-limiting logic are shared utilities (src/utils/retry.ts, src/utils/rate-limiter.ts) reused by both the fixture scraper and WhatsApp integrations; no per-integration duplication of these concerns

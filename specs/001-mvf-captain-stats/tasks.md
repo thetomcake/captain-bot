@@ -169,11 +169,17 @@
 
 **Independent Test**: Can connect to WhatsApp, post poll for next fixture, track responses
 
+### Shared Utilities (Phase 4 prerequisite — extracted from scraper, reused by WhatsApp)
+
+- [ ] T047a [P] [US2] Create shared exponential backoff utility in src/utils/retry.ts (configurable maxRetries, baseDelay, retryable HTTP status codes; replaces inline retry logic in fixture scraper)
+- [ ] T047b [P] [US2] Create shared rate-limiter utility in src/utils/rate-limiter.ts (configurable minDelay, maxConcurrent; replaces inline rate-limiting in fixture scraper)
+- [ ] T047c [US2] Refactor src/scraping/fixture-scraper.ts to use shared src/utils/retry.ts and src/utils/rate-limiter.ts (removes duplicated retry/rate-limit code added in T029)
+
 ### Tests for User Story 2 (Test-First)
 
-- [ ] T047 [P] [US2] Create WhatsApp client unit tests in tests/unit/whatsapp/client.test.ts (connection, auth state, mocked Baileys)
-- [ ] T048 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking)
-- [ ] T049 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with test group)
+- [ ] T047 [P] [US2] Define IWhatsAppClient interface in src/whatsapp/client.ts and create MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (service boundary mock per spec.md clarification — no vi.mock of Baileys; client.ts internals are not unit-tested as QR auth is interactive)
+- [ ] T048 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking using MockWhatsAppClient from T047)
+- [ ] T049 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with MockWhatsAppClient)
 - [ ] T050 [P] [US2] Create CLI poll command contract tests in tests/integration/cli/poll-command.test.ts per cli-interface.md
 
 ### Implementation for User Story 2
@@ -181,10 +187,10 @@
 #### WhatsApp Integration
 
 - [ ] T051 [US2] Implement database-backed auth state in src/whatsapp/auth.ts per research.md (BufferJSON serialization, Drizzle storage)
-- [ ] T052 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management per research.md)
+- [ ] T052 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management; exposes IWhatsAppClient interface for service-boundary mocking per spec.md clarification)
 - [ ] T053 [US2] Implement poll manager in src/whatsapp/poll-manager.ts (create polls, format messages, post to group per research.md poll pattern)
 - [ ] T054 [US2] Implement message handler in src/whatsapp/message-handler.ts (group filtering, poll response capture per research.md)
-- [ ] T055 [US2] Add rate limiting to WhatsApp operations per research.md (1 msg/12 seconds = 5 msg/minute)
+- [ ] T055 [US2] Add rate limiting to WhatsApp operations in src/whatsapp/client.ts using shared src/utils/rate-limiter.ts (1 msg/12 seconds = 5 msg/minute per research.md)
 
 #### Service Layer
 
@@ -215,7 +221,7 @@
 
 - [ ] T065 [P] [US3] Create parser service unit tests in tests/unit/services/parser-service.test.ts (pattern matching, confidence scoring, ambiguity handling per research.md)
 - [ ] T066 [P] [US3] Create stat service unit tests in tests/unit/services/stat-service.test.ts (capture window logic, defaults, deduplication)
-- [ ] T067 [P] [US3] Create stat capture integration tests in tests/integration/whatsapp/stat-capture.test.ts (end-to-end message→stat flow)
+- [ ] T067 [P] [US3] Create stat capture integration tests in tests/integration/whatsapp/stat-capture.test.ts (end-to-end message→stat flow using MockWhatsAppClient)
 - [ ] T068 [P] [US3] Create test message fixtures in tests/fixtures/messages/ (clear stats, ambiguous, edge cases)
 
 ### Implementation for User Story 3
@@ -331,7 +337,7 @@
 - [ ] T110 [P] Add input validation across all CLI commands (prevent injection per constitution principle IV)
 - [ ] T111 [P] Add file permission checks on startup (database 600, config 400, auth 700 per cli-interface.md)
 - [ ] T112 [P] Review all external inputs for vulnerabilities (club URL, WhatsApp messages, env vars)
-- [ ] T113 [P] Add rate limit protection for scraping (respectful crawling per research.md)
+- [ ] T113 [P] Add rate limit protection for scraping via shared src/utils/rate-limiter.ts
 
 ### Developer Experience
 
@@ -370,10 +376,23 @@
 ### User Story Dependencies
 
 - **US1 (P1)**: Fixtures - No dependencies on other stories (after Foundational)
-- **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls)
-- **US3 (P3)**: Stat Capture - Depends on US1 (needs game completion status), US2 (WhatsApp client reused)
+- **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls); T047a/T047b/T047c create shared utilities also consumed by scraper
+- **US3 (P3)**: Stat Capture - Depends on US1 (needs game completion status), US2 (WhatsApp client reused via IWhatsAppClient)
 - **US4 (P4)**: View/Edit Stats - Depends on US3 (needs stats to view/edit)
 - **US5 (P5)**: Season Transition - Depends on US1 (fixture management), independent testing possible
+
+### Within Phase 4 (US2)
+
+**Execution order**:
+1. T047a, T047b in parallel (shared utilities - new files, no deps)
+2. T047c (refactor scraper - depends on T047a, T047b)
+3. T047 (IWhatsAppClient interface + MockWhatsAppClient - can run alongside T047a/T047b)
+4. T048, T049, T050 in parallel (tests depend on T047 for MockWhatsAppClient)
+5. T051, T052 in parallel (implementation, no deps)
+6. T053, T054 (depend on T052 for client)
+7. T055 (rate limiting - depends on T047b for rate-limiter.ts and T052 for client.ts)
+8. T056-T058 (service layer)
+9. T059-T064 (CLI + wiring)
 
 ### Within Each User Story
 
@@ -401,36 +420,42 @@
 - Type definitions can run in parallel (T016, T017, T018)
 - Utilities can run in parallel (T020, T021)
 
+**Within Phase 4**:
+- T047a, T047b, T047 can all run in parallel (different files)
+- T048, T049, T050 can run in parallel after T047
+
 **Within User Stories**:
 - All tests for a story marked [P] can run in parallel
 - Models within a story marked [P] can run in parallel
 - Implementation tasks within story run sequentially (service dependencies)
 
-**Across User Stories** (if team capacity allows):
-- After Foundational completes, can start US1, US2, US3 in parallel
-- US4 must wait for US3
-- US5 can start in parallel with US2/US3
-
 ---
 
-## Parallel Example: User Story 1
+## Parallel Example: Phase 4 (User Story 2)
 
 ```bash
-# After Foundation completes, launch all US1 tests together:
-Task T023: "Create fixture scraper unit tests"
-Task T024: "Create fixture service integration tests"
-Task T025: "Create CLI fixtures command contract tests"
-Task T026: "Create sample HTML fixtures"
+# Launch shared utilities and interface definition together:
+Task T047a: "Create shared retry utility in src/utils/retry.ts"
+Task T047b: "Create shared rate-limiter utility in src/utils/rate-limiter.ts"
+Task T047:  "Define IWhatsAppClient + create MockWhatsAppClient"
+
+# After T047a + T047b complete:
+Task T047c: "Refactor scraper to use shared utilities"
+
+# After T047 complete, launch all US2 tests together:
+Task T048: "Poll manager unit tests"
+Task T049: "Poll service integration tests"
+Task T050: "CLI poll command contract tests"
 
 # Verify all tests FAIL (red phase)
 
 # Launch parallelizable implementation tasks:
-Task T027: "Implement static scraper"
-Task T028: "Implement dynamic scraper fallback"
+Task T051: "Implement database-backed auth state"
+Task T052: "Create WhatsApp client wrapper"
 
 # Sequential tasks follow dependencies:
-Task T029: "Create fixture scraper coordinator" (depends on T027, T028)
-Task T030: "Add retry logic" (extends T029)
+Task T053: "Implement poll manager" (depends on T052)
+Task T055: "Add rate limiting using src/utils/rate-limiter.ts" (depends on T047b, T052)
 ```
 
 ---
@@ -459,44 +484,31 @@ Task T030: "Add retry logic" (extends T029)
 
 Each user story adds value without breaking previous stories.
 
-### Parallel Team Strategy
-
-With 3+ developers:
-
-1. **Team completes Setup + Foundational together** (critical path)
-2. Once Foundational done:
-   - Developer A: US1 (Fixtures)
-   - Developer B: US2 (Polls) - can start WhatsApp integration in parallel
-   - Developer C: Database tooling, test infrastructure
-3. After US1 complete:
-   - Developer A: US3 (Stats) - needs US1 game status
-   - Developer B: Finishes US2, starts US4
-   - Developer C: US5 season detection
-4. Integration and polish together
-
 ---
 
 ## Task Count Summary
 
 - **Phase 1 (Setup)**: 10 tasks
 - **Phase 2 (Foundational)**: 12 tasks
-- **Phase 3 (US1 - Fixtures)**: 23 tasks (4 tests + 1 validation + 14 implementation + 4 FR-021)
-- **Phase 4 (US2 - Polls)**: 18 tasks (4 tests + 14 implementation)
-- **Phase 5 (US3 - Stats)**: 13 tasks (4 tests + 9 implementation)
-- **Phase 6 (US4 - View/Edit)**: 14 tasks (3 tests + 11 implementation)
-- **Phase 7 (US5 - Seasons)**: 10 tasks (3 tests + 7 implementation)
+- **Phase 3 (US1 - Fixtures)**: 23 tasks
+- **Phase 3.5 (Test Strategy)**: 12 tasks
+- **Phase 4 (US2 - Polls)**: 21 tasks (3 shared utility + 4 tests + 14 implementation)
+- **Phase 5 (US3 - Stats)**: 13 tasks
+- **Phase 6 (US4 - View/Edit)**: 14 tasks
+- **Phase 7 (US5 - Seasons)**: 10 tasks
 - **Phase 8 (Polish)**: 24 tasks
 
-**Total**: 124 tasks
+**Total**: 139 tasks
 
 **By User Story**:
 - US1: 23 tasks (MVP scope - includes FR-021 fixture rescheduling)
-- US2: 18 tasks
+- US2: 21 tasks (includes 3 shared utility tasks: T047a, T047b, T047c)
 - US3: 13 tasks
 - US4: 14 tasks
 - US5: 10 tasks
 - Foundation: 22 tasks
 - Polish: 24 tasks
+- Test Strategy (3.5): 12 tasks
 
 **Suggested MVP Scope**: Phase 1 + Phase 2 + Phase 3 = 45 tasks (US1 only)
 
@@ -506,12 +518,9 @@ With 3+ developers:
 
 - All tasks follow strict checklist format: `- [ ] [ID] [P?] [Story] Description with file path`
 - Test-First per constitution: Tests written before implementation, verified to fail first
+- **WhatsApp mocking**: Always mock at IWhatsAppClient service boundary (MockWhatsAppClient); never vi.mock('@whiskeysockets/baileys') — client.ts QR auth is interactive and not unit-tested
+- **Shared utilities**: src/utils/retry.ts and src/utils/rate-limiter.ts (T047a, T047b) created in Phase 4 and used by both scraper (T047c refactor) and WhatsApp layer (T055)
 - User story independence: Each story can be completed and tested separately
 - [P] marker indicates parallelizable tasks (different files, no dependencies)
 - File paths follow plan.md project structure
 - Constitution compliance checked throughout (CLI-first, TypeScript strict, Security-first)
-- All specifications from spec.md user stories are covered
-- All entities from data-model.md are implemented
-- All CLI commands from cli-interface.md are implemented
-- All technical patterns from research.md are applied
-- All validation scenarios from quickstart.md can be executed
