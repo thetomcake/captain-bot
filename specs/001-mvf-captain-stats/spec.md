@@ -18,6 +18,14 @@
 - Q: Fixture Update Frequency - how often should the system automatically recheck fixtures from the club website? → A: Daily checks at 6 AM UK time + manual refresh command
 - Q: Stat Parsing Confidence Threshold - what criteria determine if a message is "clear" enough to capture stats? → A: Use confidence scoring (0-100%) with 70% threshold
 
+### Session 2026-06-11
+
+- Q: Should the MVP include both static (Axios+Cheerio) and dynamic (Playwright) web scraping, or start with static only? → A: Start with static scraping only (Axios+Cheerio), add Playwright later if needed
+- Q: What happens when the club website is unavailable during the daily 6 AM check? → A: Skip the check, retry at the next scheduled check 24 hours later
+- Q: Who can run the tool - is it captain-only, or can players also install it? → A: Single server deployment using the operator's WhatsApp credentials; "captain" means the person running the tool (the admin/operator)
+- Q: What level of logging is needed for the daemon? → A: Verbose logging with timestamps for all operations (polls posted, messages processed, fixtures checked, errors) for full audit trail
+- Q: How should the system handle fixtures that are rescheduled after a poll has been posted? → A: Post new poll automatically with updated fixture details, mark old poll as superseded
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - View Team Fixtures (Priority: P1)
@@ -103,8 +111,8 @@ As a team captain, I need the system to automatically recognize when a new seaso
 
 ### Edge Cases
 
-- What happens when the club website is unavailable or slow to respond?
-- How does the system handle fixtures that are rescheduled after a poll has been posted?
+- When the club website is unavailable during the daily 6 AM check, the system skips the check and retries at the next scheduled check 24 hours later (captain can trigger manual refresh if urgent)
+- When a fixture is rescheduled after a poll has been posted, the system automatically posts a new poll with updated fixture details and marks the old poll as superseded
 - What happens when a player edits or deletes a WhatsApp message containing stats?
 - How does the system handle ambiguous stat messages like "think I got 2" or "maybe assisted"?
 - What happens when multiple players claim the same goal?
@@ -135,6 +143,8 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **FR-017**: System MUST store captured stats and poll responses in a database, retained per season
 - **FR-018**: Captain MUST be able to view recorded stats for any game in current or previous seasons
 - **FR-019**: Captain MUST be able to correct recorded stats, including for past seasons
+- **FR-020**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, errors) to provide full audit trail for debugging and monitoring
+- **FR-021**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, automatically post a new poll with updated fixture details, and mark the old poll as superseded
 
 ### Key Entities
 
@@ -162,9 +172,9 @@ As a team captain, I need the system to automatically recognize when a new seaso
 
 ## Assumptions
 
-- The MAN v FAT Football website structure remains consistent enough to scrape fixture information reliably
+- The MAN v FAT Football website structure remains consistent enough to scrape fixture information reliably with static HTML parsing (no JavaScript rendering required for MVP; dynamic scraping can be added later if needed)
 - WhatsApp Web API (Baileys library) provides stable QR code authentication with persistent encrypted session support
-- Captain has physical access to their phone for initial QR code scan authentication
+- The tool runs on a server as a single deployment instance using the operator's (captain's) WhatsApp credentials; operator has physical access to their phone for initial QR code scan authentication
 - Players use the authorized WhatsApp group for team communication and stat reporting
 - The team plays on a regular weekly schedule with predictable fixture patterns
 - Internet connectivity is generally available for periodic fixture checks and WhatsApp monitoring
