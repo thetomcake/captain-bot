@@ -20,6 +20,9 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 - better-sqlite3 (SQLite driver for Node.js)
 - axios + cheerio (static HTML scraping)
 - playwright (fallback for dynamic content)
+- minimist (argv parsing for CLI)
+
+**Dependency Philosophy**: Minimize infrastructure dependencies for supply chain security and transparency. Use libraries for domain-specific complexity (WhatsApp protocol → Baileys, SQL type safety → Drizzle, web scraping → Playwright), not for thin wrappers over Node.js APIs (logging, CLI routing, formatting). Custom implementations (~400 lines total) provide full control without the maintenance burden of 100+ transitive dependencies.
 
 **Storage**: SQLite (development/production), with database abstraction via Drizzle ORM to support PostgreSQL, MySQL, or other SQL databases in future
 

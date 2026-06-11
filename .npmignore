@@ -1,0 +1,27 @@
+# Source files
+src/
+tests/
+specs/
+.specify/
+
+# Development files
+.env
+.env.*
+*.db
+.whatsapp-auth/
+tsconfig.json
+vitest.config.ts
+.eslintrc.json
+.prettierrc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Documentation (keep README in package)
+INITIAL_SPEC.md

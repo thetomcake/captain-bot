@@ -1140,6 +1140,97 @@ describe('Manual Scheduler Tests', () => {
 
 ---
 
+## Logging & CLI Infrastructure (Custom Implementation)
+
+### Decision
+
+Use **custom implementations** for logging, CLI routing, and output formatting with no external dependencies.
+
+**Components**:
+- **Logger**: Winston-like interface (~144 lines) with log levels, file + console output, metadata support
+- **CLI Router**: Switch-based command dispatcher (~55 lines) with help text generation
+- **Formatter**: JSON + table output (~208 lines) with ANSI color support and NO_COLOR compliance
+- **Argv Parser**: Uses `minimist` library (handles edge cases: quoted strings, mixed flags, `--flag=value` vs `--flag value`)
+
+### Rationale
+
+- **Supply chain security**: Zero dependencies means zero third-party vulnerabilities for infrastructure code
+- **Transparency**: Full control over file I/O, stdout/stderr, error handling without digging through library code
+- **Simplicity**: Node.js APIs (fs.createWriteStream, process.stdout, console.log) handle all requirements
+- **No version conflicts**: No need to manage peerDependencies or breaking changes in logging/CLI libraries
+- **Project scale**: 7 CLI commands, single log file, table output → custom code is SIMPLER than configuring libraries
+
+### Implementation Patterns
+
+**Basic Logging**
+
+```typescript
+import { getLogger } from './utils/logger';
+
+const logger = getLogger();
+logger.info('Fixture scraping started', { url: clubUrl });
+logger.error('Scraping failed', new Error('Network timeout'), { retries: 3 });
+```
+
+**CLI Command Registration**
+
+```typescript
+// src/cli/index.ts
+switch (command) {
+  case 'fixtures':
+    await fixturesCommand(args);
+    break;
+  case 'sync':
+    await syncCommand(args);
+    break;
+  default:
+    showHelp();
+    process.exit(1);
+}
+```
+
+**Output Formatting**
+
+```typescript
+import { formatTable, formatJSON } from './cli/output/formatter';
+
+const options = { format: args.json ? 'json' : 'table', noColor: args.noColor };
+const output = formatTable(['Date', 'Team', 'Venue'], rows, options);
+console.log(output);
+```
+
+### Alternatives Considered
+
+**Logging Libraries**:
+- **winston**: 100+ dependencies, transport abstraction overkill for single-file logging
+- **pino**: Async-only architecture unnecessary for CLI tool (no high-throughput logging)
+- **bunyan**: JSON-only output, less human-readable for terminal debugging
+
+**CLI Frameworks**:
+- **commander**: Heavy API with chaining, subcommands, auto-generated help - overkill for 7 simple commands with custom help
+- **yargs**: Complex builder pattern, large API surface for basic switch-case logic
+- **minimist**: ✅ **CHOSEN** - Minimal argv parser (handles edge cases), no framework overhead, industry standard (used by npm/webpack)
+- **inquirer**: Interactive prompts not needed (daemon mode runs unattended)
+
+**Formatting Libraries**:
+- **chalk**: Provides colors only, still need table layout logic
+- **cli-table3**: Inflexible column width calculation, harder to customize separators
+- **ora**: Spinners/progress bars not needed for instant CLI output
+
+### Testing Strategy
+
+Unit tests validate custom implementations meet requirements without library overhead. See:
+- `tests/unit/utils/logger.test.ts` (log levels, file writing, metadata)
+- `tests/unit/cli/output/formatter.test.ts` (table formatting, NO_COLOR support)
+
+### References
+
+- [Node.js fs.createWriteStream Documentation](https://nodejs.org/api/fs.html#filehandlecreatewritestreamoptions)
+- [ANSI Escape Codes for Terminal Colors](https://en.wikipedia.org/wiki/ANSI_escape_code)
+- [NO_COLOR Standard](https://no-color.org/)
+
+---
+
 ## Season Transition Detection
 
 ### Decision
