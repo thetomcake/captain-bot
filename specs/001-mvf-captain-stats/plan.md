@@ -25,7 +25,11 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 
 **Storage**: SQLite (development/production), with database abstraction via Drizzle ORM to support PostgreSQL, MySQL, or other SQL databases in future
 
-**Testing**: Vitest (modern TypeScript test framework) or Jest with ts-jest
+**Testing**: Vitest with fast execution (<10 seconds for full suite)
+- **Database**: Real Drizzle ORM + better-sqlite3 with `:memory:` - full integration, zero I/O
+- **Web Scraping**: Real Axios + Cheerio with static HTML test fixtures - no HTTP mocking, control inputs
+- **WhatsApp**: Mock at service boundary (WhatsAppClient interface), not Baileys SDK methods
+- **Principle**: Mock at service boundaries, not library boundaries - use real libraries with controlled inputs
 
 **Target Platform**: Node.js CLI application (Linux/macOS/Windows), long-running daemon for WhatsApp monitoring
 
@@ -63,14 +67,21 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 - Daemon mode: `captain-stats daemon` for WhatsApp monitoring
 - Output formats: human-readable tables (default), JSON with `--json` flag
 
-### II. Test-First ✅ PASS (with caveat)
-**Compliance**: Tests will be written before implementation for all core business logic.
+### II. Test-First ✅ PASS
+**Compliance**: Tests written before implementation. Fast execution (<10 seconds) achieved by mocking at service boundaries, not library boundaries.
+
+**Mocking Strategy**:
+- **Mock at service boundaries**: WhatsAppClient interface, external HTTP endpoints
+- **Don't mock libraries**: Use real Axios, Cheerio, Drizzle, better-sqlite3
+- **Control inputs**: Static HTML files for scraping, `:memory:` database, test fixtures
 
 **Implementation Notes**:
-- Contract tests for WhatsApp interactions (mocked Baileys SDK)
-- Integration tests for database operations
-- Unit tests for stat parsing, fixture extraction, season detection
-- **Caveat**: Initial WhatsApp integration will require manual verification due to QR code authentication and real-time message monitoring
+- **Fixture scraping tests**: Real Axios + Cheerio reading local HTML files (no HTTP mocking)
+- **WhatsApp tests**: Mock WhatsAppClient service interface (not individual Baileys methods)
+- **Database tests**: Real Drizzle + better-sqlite3 with `:memory:` database
+- **Parser tests**: Pure functions with comprehensive test cases (no mocking needed)
+- **Service composition**: Real implementations with mocked service dependencies where needed
+- **Manual verification**: QR code auth and group authorization (one-time setup, outside test suite)
 
 ### III. TypeScript ✅ PASS
 **Compliance**: Strict TypeScript configuration enforced. All dependencies chosen for native TypeScript support.

@@ -82,49 +82,84 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T023 [P] [US1] Create fixture scraper unit tests in tests/unit/scrapers/fixture-scraper.test.ts (static HTML parsing with axios + cheerio; tests must validate extraction of date, time, opponent, venue per FR-002)
-- [ ] T024 [P] [US1] Create fixture service integration tests in tests/integration/fixtures/fixture-retrieval.test.ts (end-to-end scraping, caching, error handling)
-- [ ] T025 [P] [US1] Create CLI fixtures command contract tests in tests/integration/cli/fixtures-command.test.ts (output formats, exit codes per cli-interface.md)
-- [ ] T026 [P] [US1] Fetch and save live HTML from manvfatfootball.com/club/watford/ to tests/fixtures/html/manvfat-fixtures.html (capture actual page structure for realistic scraper testing)
-- [ ] T027 [US1] Verify static scraping can extract all FR-002 required fields (date, time, opponent, venue) from live manvfatfootball.com club page HTML (document CSS selectors and extraction strategy)
+- [X] T023 [P] [US1] Create fixture scraper unit tests in tests/unit/scrapers/fixture-scraper.test.ts (static HTML parsing with axios + cheerio; tests must validate extraction of date, time, opponent, venue per FR-002)
+- [X] T024 [P] [US1] Create fixture service integration tests in tests/integration/fixtures/fixture-retrieval.test.ts (end-to-end scraping, caching, error handling)
+- [X] T025 [P] [US1] Create CLI fixtures command contract tests in tests/integration/cli/fixtures-command.test.ts (output formats, exit codes per cli-interface.md)
+- [X] T026 [P] [US1] Fetch and save live HTML from manvfatfootball.com/club/watford/ to tests/fixtures/html/manvfat-fixtures.html (capture actual page structure for realistic scraper testing)
+- [X] T027 [US1] Verify static scraping can extract all FR-002 required fields (date, time, opponent, venue) from live manvfatfootball.com club page HTML (document CSS selectors and extraction strategy)
 
 ### Implementation for User Story 1
 
 #### Scraping Layer
 
-- [ ] T028 [US1] Implement fixture scraper in src/scraping/fixture-scraper.ts using axios + cheerio for static HTML parsing per research.md
-- [ ] T029 [US1] Add retry logic and rate limiting to scraper per research.md error handling patterns
+- [X] T028 [US1] Implement fixture scraper in src/scraping/fixture-scraper.ts using axios + cheerio for static HTML parsing per research.md
+- [X] T029 [US1] Add retry logic and rate limiting to scraper per research.md error handling patterns
 
 #### Service Layer
 
-- [ ] T030 [US1] Implement FixtureService in src/services/fixture-service.ts (scrape, cache, detect changes per data-model.md)
-- [ ] T031 [US1] Implement SeasonService in src/services/season-service.ts (get/create current season, season boundary detection per research.md)
-- [ ] T032 [US1] Add fixture database operations: insert, update, query by season
+- [X] T030 [US1] Implement FixtureService in src/services/fixture-service.ts (scrape, cache, detect changes per data-model.md)
+- [X] T031 [US1] Implement SeasonService in src/services/season-service.ts (get/create current season, season boundary detection per research.md)
+- [X] T032 [US1] Add fixture database operations: insert, update, query by season
 
 #### Fixture Change Detection (FR-021)
 
-- [ ] T033 [US1] Implement fixture change detection in FixtureService (compare scraped fixtures to stored games, detect date/time/venue changes per FR-021)
+- [X] T033 [US1] Implement fixture change detection in FixtureService (compare scraped fixtures to stored games, detect date/time/venue changes per FR-021)
 - [ ] T034 [US1] Add delete poll + responses database operations (cascade delete poll and all poll_responses for a given fixture when rescheduled)
 - [ ] T035 [US1] Add automatic re-poll posting when fixture rescheduled (delete old poll records, trigger new poll creation per FR-021)
 - [ ] T036 [US1] Add logging for fixture rescheduling events (old values, new values, poll deletion/recreation per quickstart.md)
 
 #### CLI Commands
 
-- [ ] T037 [US1] Implement `captain-stats fixtures` command in src/cli/commands/fixtures.ts per cli-interface.md
-- [ ] T038 [US1] Implement `captain-stats sync` command in src/cli/commands/sync.ts per cli-interface.md
-- [ ] T039 [US1] Implement `captain-stats init` command in src/cli/commands/init.ts per cli-interface.md
-- [ ] T040 [US1] Add table output formatter in src/cli/output/table.ts for fixtures display
-- [ ] T041 [US1] Add JSON output formatter in src/cli/output/json.ts for fixtures data
+- [X] T037 [US1] Implement `captain-stats fixtures` command in src/cli/commands/fixtures.ts per cli-interface.md
+- [X] T038 [US1] Implement `captain-stats sync` command in src/cli/commands/sync.ts per cli-interface.md
+- [X] T039 [US1] Implement `captain-stats init` command in src/cli/commands/init.ts per cli-interface.md
+- [X] T040 [US1] Add table output formatter in src/cli/output/table.ts for fixtures display
+- [X] T041 [US1] Add JSON output formatter in src/cli/output/json.ts for fixtures data
 
 #### Integration
 
-- [ ] T042 [US1] Wire fixtures command to CLI router in src/cli/index.ts
-- [ ] T043 [US1] Wire sync command to CLI router in src/cli/index.ts
-- [ ] T044 [US1] Wire init command to CLI router in src/cli/index.ts
-- [ ] T045 [US1] Add validation and error handling for all US1 commands
-- [ ] T046 [US1] Add logging for fixture operations (scrape, sync, display)
+- [X] T042 [US1] Wire fixtures command to CLI router in src/cli/index.ts
+- [X] T043 [US1] Wire sync command to CLI router in src/cli/index.ts
+- [X] T044 [US1] Wire init command to CLI router in src/cli/index.ts
+- [ ] T045 [US1] Add logging for fixture operations (scrape, sync, display)
 
-**Checkpoint**: User Story 1 complete - fixtures can be viewed and synced independently
+**Note**: T045 (validation/error handling) expanded into Phase 3.5 tasks T045a-T045l for test-driven implementation
+
+---
+
+## Phase 3.5: Test Strategy Alignment (Technical Debt)
+
+**Purpose**: Align test suite with mocking philosophy from plan.md/research.md and fix performance issues
+
+**Current Issues**:
+- Test suite takes 169s (target: <10s per SC-010)
+- Integration tests making real HTTP calls to manvfatfootball.com
+- 6 tests failing: JSON output format, exit codes, fixture change detection
+
+**Goal**: Fast (<10s), reliable test suite following "mock at service boundaries, not libraries" principle
+
+### Test Infrastructure & Mocking
+
+- [ ] T045a [P] [US1] Create injectable scraper interface in src/scraping/fixture-scraper.ts (separate fetchHtml() from parseFixtures())
+- [ ] T045b [P] [US1] Update FixtureService to accept injectable scraper (constructor dependency injection)
+- [ ] T045c [US1] Update integration tests to inject mock scraper returning static HTML (no real HTTP calls per research.md)
+- [ ] T045d [US1] Create test helper for mock scraper in tests/helpers/mock-scraper.ts
+- [ ] T045e [US1] Verify test suite completes in <10 seconds after HTTP mocking
+
+### Fix Implementation Bugs (from test failures)
+
+- [ ] T045f [US1] Fix JSON output contamination in src/cli/output/json.ts (ensure pure JSON, no decorative characters when --json flag used)
+- [ ] T045g [US1] Fix exit codes in src/cli/commands/fixtures.ts (database error should exit 3 per cli-interface.md)
+- [ ] T045h [US1] Fix fixture change detection logic in src/services/fixture-service.ts (properly detect date/time/venue changes per FR-021)
+- [ ] T045i [US1] Fix error handling for missing config in src/cli/commands/fixtures.ts (clear error message, correct exit code)
+
+### Validation
+
+- [ ] T045j [US1] Run full test suite and verify all 31 tests pass
+- [ ] T045k [US1] Verify test suite execution time <10 seconds (measure with `time npm test`)
+- [ ] T045l [US1] Document test mocking patterns in tests/README.md (service boundaries, no library mocking)
+
+**Checkpoint**: Test suite fast (<10s), all tests passing, mocking philosophy correctly implemented
 
 ---
 

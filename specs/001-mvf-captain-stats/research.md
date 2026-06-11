@@ -6,6 +6,94 @@ This research document consolidates technical investigations for building the Ca
 
 ---
 
+## Test Strategy & Mocking Philosophy
+
+### Core Principle: Mock at Service Boundaries, Not Library Boundaries
+
+**Goal**: Fast tests (<10 seconds total) with high confidence that real implementations work correctly together.
+
+### Decision
+
+- **Mock at service boundaries**: WhatsApp client interface, external HTTP endpoints
+- **Don't mock low-level libraries**: Use real Axios, Cheerio, Drizzle ORM, better-sqlite3
+- **Control inputs**: Static HTML files, in-memory databases, test fixtures
+
+### Rationale
+
+**Why not mock libraries**:
+- Mocking Axios doesn't prove your HTTP client configuration works
+- Mocking Cheerio doesn't prove your CSS selectors are correct
+- Mocking Drizzle doesn't prove your SQL queries are valid
+- Over-mocking creates false confidence and brittle tests tied to implementation details
+
+**Why mock at service boundaries**:
+- Tests run fast (no real network/disk I/O)
+- Service interfaces are stable (implementation can change)
+- Forces good architecture (clear service boundaries)
+- High confidence that real code paths work
+
+### Implementation by Component
+
+| Component | Approach | Rationale |
+|-----------|----------|-----------|
+| **Fixture Scraping** | Real Axios + Cheerio, static HTML files | Proves selectors work against real HTML structure |
+| **Database** | Real Drizzle + better-sqlite3 `:memory:` | Proves queries work, zero disk I/O |
+| **WhatsApp** | Mock WhatsAppClient service interface | Network/auth too expensive for unit tests |
+| **Stat Parsing** | Pure functions, comprehensive test cases | No external dependencies to mock |
+| **Services** | Real implementations with mocked service deps | Tests composition logic with controlled inputs |
+
+### Example: Fixture Scraping Tests
+
+**❌ Bad (over-mocking)**:
+```typescript
+// Mocking Axios = testing nothing
+vi.mock('axios');
+mockedAxios.get.mockResolvedValue({ data: '<html>...' });
+```
+
+**✅ Good (controlled inputs)**:
+```typescript
+// Real Axios + Cheerio, but reading local file
+import { readFileSync } from 'fs';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+
+const html = readFileSync('tests/fixtures/watford-fixtures.html', 'utf-8');
+const $ = cheerio.load(html);
+// Now test your real selector logic
+```
+
+### Example: Service Layer Tests
+
+**❌ Bad (mocking too low)**:
+```typescript
+// Mocking DB methods = fragile, low confidence
+vi.mock('drizzle-orm');
+mockedDb.select.mockReturnValue(...);
+```
+
+**✅ Good (real DB, mocked service deps)**:
+```typescript
+// Real in-memory database
+const db = createTestDatabase(); // Real Drizzle + :memory:
+
+// Mock only external service dependencies
+const mockWhatsApp = createMockWhatsAppClient();
+
+const service = new StatService(db, mockWhatsApp);
+// Test with real DB operations, controlled WhatsApp behavior
+```
+
+### Performance Target
+
+**Full test suite: <10 seconds**
+- Database tests: Real operations, zero I/O (`:memory:`)
+- Scraper tests: Real parsing, no HTTP calls (local HTML files)
+- Service tests: Real composition, mocked external services
+- Parser tests: Pure functions, millisecond execution
+
+---
+
 ## WhatsApp Integration (@whiskeysockets/Baileys)
 
 ### Decision
