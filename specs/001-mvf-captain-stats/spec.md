@@ -18,6 +18,12 @@
 - Q: Fixture Update Frequency - how often should the system automatically recheck fixtures from the club website? → A: Daily checks at 6 AM UK time + manual refresh command
 - Q: Stat Parsing Confidence Threshold - what criteria determine if a message is "clear" enough to capture stats? → A: Use confidence scoring (0-100%) with 70% threshold
 
+### Session 2026-06-12
+
+- Q: How should initial WhatsApp group JID discovery work? → A: New `captain-stats connect` command: connects to WhatsApp, shows QR code, lists available groups with their JIDs, outputs JID to console for operator to set in `.env`
+- Q: Where should the discovered group JID be persisted after the connect command? → A: Print to console only — operator manually adds `AUTHORIZED_GROUP_ID=<jid>` to `.env`; no programmatic file or database write
+- Q: Should Phase 4.1 include retroactive test coverage for QR display changes added to daemon.ts outside the task process? → A: Accept daemon QR display as-is (interactive hardware, excluded from test suite per constitution); Phase 4.1 only covers the new `connect` command and its own tests
+
 ### Session 2026-06-11
 
 - Q: Should the MVP include both static (Axios+Cheerio) and dynamic (Playwright) web scraping, or start with static only? → A: Start with static scraping only (Axios+Cheerio), add Playwright later if needed
@@ -125,6 +131,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - When multiple players each claim goals for the same game, all claims are accepted without verification; captain reviews and corrects totals manually via FR-019 if needed
 - How does the system handle players who leave the team mid-season? (Players remain in historical stats; no special handling needed for MVP as stats are per-game snapshots)
 - When the WhatsApp group becomes temporarily unavailable (network issues, service outage), the daemon logs the error and retries connection with exponential backoff (10s, 30s, 1m, 5m intervals) until connection is restored
+- Before running `captain-stats daemon`, the operator MUST first run `captain-stats connect` to authenticate with WhatsApp (scan QR code), obtain the target group's JID from the console output, and set `AUTHORIZED_GROUP_ID=<jid>` in their `.env` file; the daemon will exit with an error message if `AUTHORIZED_GROUP_ID` is not configured
 - How does the system handle timezone differences between fixture times and poll posting? (Defaulting to UK time per assumptions is sufficient for MVP as MAN v FAT Football is UK-based)
 
 ## Requirements *(mandatory)*
@@ -153,6 +160,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **FR-019**: Captain MUST be able to correct recorded stats, including for past seasons
 - **FR-020**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, errors) to provide full audit trail for debugging and monitoring
 - **FR-021**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, automatically post a new poll with updated fixture details, and mark the old poll as superseded
+- **FR-022**: System MUST provide a `captain-stats connect` command that connects to WhatsApp (displaying a QR code for the operator to scan), lists all WhatsApp groups the authenticated account belongs to (name and JID), and outputs each group JID to console so the operator can identify and set `AUTHORIZED_GROUP_ID` in their `.env` before running the daemon; no group JID is persisted automatically — the operator copies it manually
 
 ### Key Entities
 
@@ -197,6 +205,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - Poll posting on the day after a game aligns with typical team coordination timelines
 - Database storage can scale to handle multiple seasons of data for a single team (estimated: 20-30 games per season, 10-15 players per team, 5+ seasons)
 - The captain uses the system regularly enough to catch and correct any stat capture errors
+- Initial WhatsApp setup requires a one-time `captain-stats connect` run to authenticate (QR scan) and identify the target group JID; the operator sets `AUTHORIZED_GROUP_ID` in `.env` before starting the daemon; the `connect` command reuses the same Baileys session storage as the daemon so no duplicate QR scan is needed on first daemon start
 - Timezone handling can default to UK time since MAN v FAT Football is UK-based
 - Tests use real database (`:memory:`) for accurate behavior validation; external dependencies are mocked at service boundaries only — MockFixtureScraper (implements IFixtureScraper) for scraping and MockWhatsAppClient (implements IWhatsAppClient) for WhatsApp; no vi.mock of library internals (axios, cheerio, Baileys) anywhere in the test suite
 - Retry (exponential backoff) and rate-limiting logic are shared utilities (src/utils/retry.ts, src/utils/rate-limiter.ts) reused by both the fixture scraper and WhatsApp integrations; no per-integration duplication of these concerns

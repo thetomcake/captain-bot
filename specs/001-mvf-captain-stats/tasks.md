@@ -216,6 +216,23 @@
 
 ---
 
+## Phase 4.1: FR-022 - WhatsApp Group Discovery (`captain-stats connect`)
+
+**Goal**: Operator can discover the target WhatsApp group JID before running the daemon, enabling `AUTHORIZED_GROUP_ID` to be set in `.env`
+
+**Independent Test**: Manual only — QR authentication is interactive and excluded from the automated test suite per constitution. See quickstart.md Scenario 3 for the step-by-step validation procedure.
+
+> **No automated tests** for this phase. The `connect` command directly invokes Baileys (requires physical QR scan) and is not testable at the service boundary level. QR display changes already present in `daemon.ts` are accepted as-is (added outside task process; same `qrcode-terminal` package).
+
+### Implementation for Phase 4.1
+
+- [ ] T064a [US2] Implement `captain-stats connect` command in src/cli/commands/connect.ts: requires team initialized (exit 2 with "run init first" if not); creates Baileys socket with `useDatabaseAuthState(db, teamId, season.id)` (same auth state scope as daemon — no second QR scan after `connect`); displays QR code via `qrcode-terminal` on `qr` event; calls `sock.groupFetchAllParticipating()` after `connection === 'open'`; prints JID and `meta.subject` for each group; calls `await sock.end()` then `process.exit(0)` after listing; logs connection error and exits 4 on close per contracts/cli-interface.md and research.md
+- [ ] T064b [US2] Wire `connect` command to CLI router in src/cli/index.ts (`case 'connect': await connectCommand(); break`)
+
+**Checkpoint**: `captain-stats connect` displays QR, lists groups after scan, exits cleanly. Operator copies correct JID to `.env` as `AUTHORIZED_GROUP_ID`. Daemon starts without second QR scan (shared auth state via database).
+
+---
+
 ## Phase 5: User Story 3 - Capture Player Stats from Chat (Priority: P3)
 
 **Goal**: Automatically capture stats (goals, assists, weight, food) from WhatsApp messages
@@ -381,7 +398,8 @@
 ### User Story Dependencies
 
 - **US1 (P1)**: Fixtures - No dependencies on other stories (after Foundational)
-- **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls); T047a/T047b/T047c create shared utilities also consumed by scraper
+- **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls); T047a/T047b/T047c create shared utilities also consumed by scraper; Phase 4.1 (T064a/T064b) extends US2 with group discovery command
+- **Phase 4.1 (FR-022)**: Depends on Phase 4 completion (WhatsApp client infrastructure in place); `connect` reuses `useDatabaseAuthState` from T051 and `qrcode-terminal` from T052/T060; must complete before daemon can be configured in production
 - **US3 (P3)**: Stat Capture - Depends on US1 (needs game completion status), US2 (WhatsApp client reused via IWhatsAppClient)
 - **US4 (P4)**: View/Edit Stats - Depends on US3 (needs stats to view/edit)
 - **US5 (P5)**: Season Transition - Depends on US1 (fixture management), independent testing possible
@@ -498,16 +516,17 @@ Each user story adds value without breaking previous stories.
 - **Phase 3 (US1 - Fixtures)**: 23 tasks
 - **Phase 3.5 (Test Strategy)**: 12 tasks
 - **Phase 4 (US2 - Polls)**: 21 tasks (3 shared utility + 4 tests + 14 implementation)
+- **Phase 4.1 (FR-022 - Connect)**: 2 tasks (manual validation only, no automated tests)
 - **Phase 5 (US3 - Stats)**: 13 tasks
 - **Phase 6 (US4 - View/Edit)**: 14 tasks
 - **Phase 7 (US5 - Seasons)**: 10 tasks
 - **Phase 8 (Polish)**: 24 tasks
 
-**Total**: 139 tasks
+**Total**: 141 tasks
 
 **By User Story**:
 - US1: 23 tasks (MVP scope - includes FR-021 fixture rescheduling)
-- US2: 21 tasks (includes 3 shared utility tasks: T047a, T047b, T047c)
+- US2: 23 tasks (includes 3 shared utility tasks: T047a, T047b, T047c + 2 Phase 4.1 connect tasks: T064a, T064b)
 - US3: 13 tasks
 - US4: 14 tasks
 - US5: 10 tasks
@@ -524,6 +543,7 @@ Each user story adds value without breaking previous stories.
 - All tasks follow strict checklist format: `- [ ] [ID] [P?] [Story] Description with file path`
 - Test-First per constitution: Tests written before implementation, verified to fail first
 - **WhatsApp mocking**: Always mock at IWhatsAppClient service boundary (MockWhatsAppClient); never vi.mock('@whiskeysockets/baileys') — client.ts QR auth is interactive and not unit-tested
+- **connect command (Phase 4.1)**: No automated tests — interactive QR scan is excluded from test suite per constitution; use Baileys `groupFetchAllParticipating()` for group listing; shares `useDatabaseAuthState` auth scope with daemon so no second QR scan is needed
 - **Shared utilities**: src/utils/retry.ts and src/utils/rate-limiter.ts (T047a, T047b) created in Phase 4 and used by both scraper (T047c refactor) and WhatsApp layer (T055)
 - User story independence: Each story can be completed and tested separately
 - [P] marker indicates parallelizable tasks (different files, no dependencies)

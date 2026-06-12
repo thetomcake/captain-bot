@@ -10,6 +10,8 @@
 
 A CLI tool to automate MAN v FAT Football team management by fetching fixtures from club websites, posting availability polls to WhatsApp after each game, capturing player stats from natural language messages within 3 days post-game, and maintaining historical data across multiple seasons. Built with TypeScript (strict mode), Baileys WhatsApp library, Drizzle ORM with SQLite (swappable to other SQL databases), and Axios/Cheerio for static web scraping.
 
+**Phase 4.1 addition (2026-06-12)**: `captain-stats connect` command for one-time WhatsApp onboarding — connects, displays QR code, lists available groups (name + JID) via Baileys `groupFetchAllParticipating()`, then exits. Operator copies the target group JID to `.env` as `AUTHORIZED_GROUP_ID` before running the daemon. Auth state is shared between `connect` and `daemon` (same database-backed Baileys session) so no second QR scan is required.
+
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x (strict mode, no 'any' types), Node.js 22.x (current release, Baileys compatible)
@@ -128,6 +130,7 @@ src/
 │   │   ├── fixtures.ts   # Fixtures command
 │   │   ├── stats.ts      # Stats view/edit commands
 │   │   ├── daemon.ts     # Daemon mode for WhatsApp monitoring
+│   │   ├── connect.ts    # Phase 4.1: one-time WhatsApp group discovery
 │   │   └── poll.ts       # Manual poll posting
 │   └── output/
 │       ├── table.ts      # Human-readable table formatting

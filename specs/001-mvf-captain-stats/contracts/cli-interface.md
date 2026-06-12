@@ -312,6 +312,58 @@ Last sync: 2026-06-10 14:30
 
 ---
 
+### `captain-stats connect`
+
+Connect to WhatsApp, display QR code for scanning, then list all available groups with their JIDs so the operator can configure `AUTHORIZED_GROUP_ID`.
+
+**Usage**:
+```bash
+captain-stats connect
+```
+
+**Options**: None
+
+**Behavior**:
+1. Connects to WhatsApp using Baileys (database-backed auth state, shared with daemon)
+2. If no existing session: displays QR code for the operator to scan with their phone
+3. If existing session: reconnects automatically without a QR scan
+4. After connection: calls `groupFetchAllParticipating()` and prints all groups
+5. Exits cleanly after listing
+
+**Output**:
+```
+Captain Stats - WhatsApp Group Setup
+Connecting to WhatsApp...
+
+Scan this QR code with WhatsApp:
+[QR CODE DISPLAYED]
+
+✓ Connected to WhatsApp
+Fetching your groups...
+
+Group JID                              Name
+──────────────────────────────────────────────────────────────────────
+120363123456789012@g.us                Team Alpha Watford
+120363987654321098@g.us                Friends Football
+120363111222333444@g.us                Work 5-a-side
+
+Set your authorized group in .env:
+  AUTHORIZED_GROUP_ID=<group-jid>
+```
+
+**Exit Codes**:
+- `0` - Success (groups listed)
+- `2` - Configuration error (no team initialized — run `init` first)
+- `3` - Database error
+- `4` - WhatsApp connection error
+
+**Notes**:
+- Run this command **before** `captain-stats daemon` on first setup
+- Auth state is shared with the daemon — no second QR scan required when starting the daemon
+- If the QR code is not scanned within Baileys' timeout window, the command exits with code 4 and can be re-run
+
+---
+
 ### `captain-stats init`
 
 Initialize configuration and database.

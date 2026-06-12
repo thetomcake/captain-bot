@@ -94,6 +94,85 @@ const service = new StatService(db, mockWhatsApp);
 
 ---
 
+## WhatsApp Group Discovery (Phase 4.1: `connect` command)
+
+### Decision
+
+Use Baileys `sock.groupFetchAllParticipating()` after authentication to list all groups and print their JID and name. The operator copies the correct JID to `.env` as `AUTHORIZED_GROUP_ID`.
+
+### Rationale
+
+- `groupFetchAllParticipating()` returns a `Promise<{ [jid: string]: GroupMetadata }>` — the simplest way to enumerate groups without subscribing to events
+- No new dependencies: the same Baileys connection used by the daemon handles group listing
+- Session reuse: the `connect` command writes auth state to the same database as the daemon (scoped by teamId/seasonId), so no second QR scan is required when the daemon starts
+
+### Implementation Pattern
+
+```typescript
+// In src/cli/commands/connect.ts
+import makeWASocket, { Browsers } from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import { useDatabaseAuthState } from '../../whatsapp/auth.js';
+
+export async function connectCommand(): Promise<void> {
+  const { db } = getDatabase();
+  const team = await getOrCreateTeam(db);
+  const season = await getOrCreateSeason(db, team.id);
+
+  const { state, saveCreds } = await useDatabaseAuthState(db, team.id, season.id);
+
+  const sock = makeWASocket({
+    auth: state,
+    browser: Browsers.ubuntu('CaptainBot'),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async ({ connection, qr }) => {
+    if (qr) {
+      console.log('\nScan this QR code with WhatsApp:');
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === 'open') {
+      console.log('\n✓ Connected to WhatsApp');
+      console.log('Fetching your groups...\n');
+
+      const groups = await sock.groupFetchAllParticipating();
+      const entries = Object.entries(groups);
+
+      if (entries.length === 0) {
+        console.log('No groups found for this WhatsApp account.');
+      } else {
+        console.log('Group JID                         Name');
+        console.log('─'.repeat(70));
+        for (const [jid, meta] of entries) {
+          console.log(`${jid.padEnd(36)} ${meta.subject}`);
+        }
+        console.log('\nSet your authorized group in .env:');
+        console.log('  AUTHORIZED_GROUP_ID=<group-jid>');
+      }
+
+      await sock.logout();  // clean disconnect after listing
+      process.exit(0);
+    }
+  });
+}
+```
+
+### Testing Strategy
+
+The `connect` command is interactive (QR scan required) and therefore excluded from the automated test suite per the project constitution. No unit tests. Manual validation only: run `captain-stats connect`, scan QR, verify group list appears with correct JIDs.
+
+### Alternatives Considered
+
+- **Store JID in database automatically**: Rejected (per clarification 2026-06-12); operator must explicitly confirm which group to authorize
+- **Interactive group selection prompt**: Rejected — no interactive prompt library in use; listing and copying is simpler and more composable
+
+---
+
 ## WhatsApp Integration (@whiskeysockets/Baileys)
 
 ### Decision

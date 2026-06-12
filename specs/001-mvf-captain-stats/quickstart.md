@@ -134,51 +134,90 @@ npm run test:integration -- fixtures-scraping.test.ts
 
 ---
 
-## Validation Scenario 3: WhatsApp Connection & Authentication
+## Validation Scenario 3: WhatsApp Setup — Connect & Discover Group JID
 
-**Goal**: Verify WhatsApp client connection and QR code authentication.
+**Goal**: Verify the one-time WhatsApp onboarding flow: QR authentication, group listing, and `AUTHORIZED_GROUP_ID` configuration.
+
+> **This scenario must be completed before Scenario 4 (Poll Posting) and before running the daemon.**
 
 ### Prerequisites
-- Scenario 1 completed
+- Scenario 1 completed (database and team initialized)
 - WhatsApp mobile app installed and accessible
-- Test WhatsApp account available (not primary personal account)
+- `.env` file does **not** yet have `AUTHORIZED_GROUP_ID` set (first-time setup)
 
-### Commands
+### Step 1 — Run `connect` command
+
 ```bash
-# Start daemon in foreground
-./bin/captain-stats daemon --foreground
-
-# QR code will be displayed in terminal
-# Scan with WhatsApp mobile app
+node dist/cli/index.js connect
 ```
 
-### Expected Outcome
-- QR code displayed in terminal (ASCII art or image)
-- After scanning: "✓ Connected to WhatsApp" message
-- WhatsApp auth state saved to `.whatsapp-auth/` directory
-- Daemon continues running, monitoring group
-- Exit code: 0 (when stopped with Ctrl+C)
+**Expected outcome**:
+- `"Connecting to WhatsApp..."` printed
+- QR code rendered in terminal via `qrcode-terminal`
+- After scanning with WhatsApp mobile: `"✓ Connected to WhatsApp"`
+- List of groups printed with JID and name
+- Command exits cleanly with code 0
 
-### Validation
+**Expected output format**:
+```
+Captain Stats - WhatsApp Group Setup
+Connecting to WhatsApp...
+
+[QR CODE]
+
+✓ Connected to WhatsApp
+Fetching your groups...
+
+Group JID                              Name
+──────────────────────────────────────────────────────────────────────
+120363123456789012@g.us                Team Alpha Watford
+...
+
+Set your authorized group in .env:
+  AUTHORIZED_GROUP_ID=<group-jid>
+```
+
+### Step 2 — Configure `.env`
+
+Identify the correct group from the list and add to `.env`:
 ```bash
-# Check auth state files created
-ls -la .whatsapp-auth/
-# Expected: creds.json and other session files
+echo "AUTHORIZED_GROUP_ID=120363123456789012@g.us" >> .env
+```
 
-# Verify permissions (owner-only)
-stat -c "%a" .whatsapp-auth/
-# Expected: 700 (drwx------)
+### Step 3 — Verify daemon starts correctly
+
+```bash
+TEAM_NAME="My Team" CLUB_URL="https://manvfatfootball.com/club/watford/" \
+  node dist/cli/index.js daemon --foreground
+```
+
+**Expected outcome**:
+- No `AUTHORIZED_GROUP_ID not configured` error
+- No second QR scan required (auth state reused from `connect`)
+- `"✓ Connected to WhatsApp"` printed
+- `"✓ Monitoring group: <jid>"` printed
+- Daemon running message appears
+
+### Validation Query
+
+```bash
+# Verify auth state is stored in database (not a separate file)
+sqlite3 captain-stats.db "SELECT COUNT(*) FROM auth_states;" 
+# Expected: > 0 rows (session credentials stored)
 ```
 
 ### Success Criteria
-✅ QR code displayed successfully
-✅ Authentication completes after scanning
-✅ Auth state persisted to disk securely
-✅ Connection remains stable for 5+ minutes
-✅ Daemon logs show "Monitoring group" status
+✅ QR code displayed and scannable
+✅ Group list printed with JID and group name after authentication
+✅ Auth state persisted in database (shared between `connect` and `daemon`)
+✅ No second QR scan when daemon starts after `connect`
+✅ Daemon starts without `AUTHORIZED_GROUP_ID` error after `.env` is set
+✅ `connect` exits cleanly (code 0) after listing groups
 
-### Manual Test
-After authentication, send a test message to the authorized group from mobile app. Verify daemon logs show message received.
+### Notes
+- This is a **manual-only** test — QR auth is interactive and excluded from the automated suite
+- If the QR code expires before scanning, re-run `captain-stats connect`
+- The `connect` command is safe to re-run; it will reconnect without a QR scan if session is still valid
 
 ---
 
