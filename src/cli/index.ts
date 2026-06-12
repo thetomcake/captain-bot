@@ -59,6 +59,7 @@ async function main(): Promise<void> {
     console.log('  sync       Sync fixtures from club website');
     console.log('  stats      View and edit game statistics');
     console.log('  poll       Post availability poll to WhatsApp');
+    console.log('  connect    Connect to WhatsApp and list group JIDs');
     console.log('  daemon     Run WhatsApp monitoring daemon');
     console.log('  seasons    View season history');
     console.log('');
@@ -173,6 +174,12 @@ async function main(): Promise<void> {
         foreground: parsed.foreground as boolean | undefined,
         log: parsed.log as string | undefined,
       });
+      break;
+    }
+
+    case 'connect': {
+      const { connectCommand } = await import('./commands/connect.js');
+      await connectCommand();
       break;
     }
 

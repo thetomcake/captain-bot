@@ -12,6 +12,8 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 
 **Phase 4.1 addition (2026-06-12)**: `captain-stats connect` command for one-time WhatsApp onboarding — connects, displays QR code, lists available groups (name + JID) via Baileys `groupFetchAllParticipating()`, then exits. Operator copies the target group JID to `.env` as `AUTHORIZED_GROUP_ID` before running the daemon. Auth state is shared between `connect` and `daemon` (same database-backed Baileys session) so no second QR scan is required.
 
+**Phase 4.1 adaptation (2026-06-12) — QR PNG fallback (FR-023)**: Terminal ASCII QR codes are not reliably scannable on all terminal emulators. Both `connect` and `daemon` now also write the QR to `captain-stats-qr.png` in the OS temp directory (`os.tmpdir()`) using the `qrcode` npm package, print the path, and attempt auto-open via `xdg-open`/`open`. The PNG is refreshed on each QR event. `qrcode-terminal` is retained for operators where ASCII render does work.
+
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x (strict mode, no 'any' types), Node.js 22.x (current release, Baileys compatible)
@@ -22,6 +24,7 @@ A CLI tool to automate MAN v FAT Football team management by fetching fixtures f
 - better-sqlite3 (SQLite driver for Node.js)
 - axios + cheerio (static HTML scraping)
 - minimist (argv parsing for CLI)
+- qrcode (PNG/SVG QR code rendering — dual-output QR display for operators where terminal ASCII is not scannable)
 
 **Dependency Philosophy**: Minimize infrastructure dependencies for supply chain security and transparency. Use libraries for domain-specific complexity (WhatsApp protocol → Baileys, SQL type safety → Drizzle, HTML parsing → Cheerio), not for thin wrappers over Node.js APIs (logging, CLI routing, formatting). Custom implementations (~400 lines total) provide full control without the maintenance burden of 100+ transitive dependencies.
 

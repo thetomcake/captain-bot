@@ -23,6 +23,7 @@
 - Q: How should initial WhatsApp group JID discovery work? → A: New `captain-stats connect` command: connects to WhatsApp, shows QR code, lists available groups with their JIDs, outputs JID to console for operator to set in `.env`
 - Q: Where should the discovered group JID be persisted after the connect command? → A: Print to console only — operator manually adds `AUTHORIZED_GROUP_ID=<jid>` to `.env`; no programmatic file or database write
 - Q: Should Phase 4.1 include retroactive test coverage for QR display changes added to daemon.ts outside the task process? → A: Accept daemon QR display as-is (interactive hardware, excluded from test suite per constitution); Phase 4.1 only covers the new `connect` command and its own tests
+- Q: How should the QR code be displayed for operators whose terminal cannot render a scannable QR code? → A: Write a PNG file (`captain-stats-qr.png`) to the OS temp directory (`os.tmpdir()`) alongside the terminal ASCII render; print the file path to console; attempt auto-open with the platform's native image viewer (xdg-open on Linux, open on macOS); applies to both `connect` and `daemon` commands; PNG is refreshed on each new QR event (Baileys re-emits on expiry)
 
 ### Session 2026-06-11
 
@@ -161,6 +162,7 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **FR-020**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, errors) to provide full audit trail for debugging and monitoring
 - **FR-021**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, automatically post a new poll with updated fixture details, and mark the old poll as superseded
 - **FR-022**: System MUST provide a `captain-stats connect` command that connects to WhatsApp (displaying a QR code for the operator to scan), lists all WhatsApp groups the authenticated account belongs to (name and JID), and outputs each group JID to console so the operator can identify and set `AUTHORIZED_GROUP_ID` in their `.env` before running the daemon; no group JID is persisted automatically — the operator copies it manually
+- **FR-023**: When displaying a WhatsApp QR code (in `connect` or `daemon` commands), the system MUST render the code both as ASCII art in the terminal AND as a PNG file (`captain-stats-qr.png`) saved to the OS temp directory (`os.tmpdir()`); the PNG file path MUST be printed to console; the system MUST attempt to auto-open the PNG with the platform's native image viewer (xdg-open on Linux, open on macOS); the PNG MUST be refreshed on each new QR event so it stays current if the previous code expires
 
 ### Key Entities
 

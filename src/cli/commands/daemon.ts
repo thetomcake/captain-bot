@@ -1,4 +1,8 @@
 import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
+import { spawn } from 'child_process';
+import path from 'path';
+import os from 'os';
 import { createRequire } from 'module';
 import { getDatabase } from '../../database/client.js';
 import * as schema from '../../database/schema.js';
@@ -12,6 +16,22 @@ import { Cron } from 'croner';
 
 const _require = createRequire(import.meta.url);
 const { version } = _require('../../../package.json') as { version: string };
+
+function tryAutoOpen(filePath: string): void {
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  try {
+    spawn(opener, [filePath], { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // Best-effort only — silently ignore if auto-open is unavailable
+  }
+}
+
+async function writeQrPng(qr: string): Promise<void> {
+  const qrPath = path.join(os.tmpdir(), 'captain-stats-qr.png');
+  await QRCode.toFile(qrPath, qr);
+  console.log(`QR code saved to: ${qrPath}`);
+  tryAutoOpen(qrPath);
+}
 
 export interface DaemonCommandOptions {
   foreground?: boolean;
@@ -94,6 +114,7 @@ export async function daemonCommand(options: DaemonCommandOptions = {}): Promise
   client.onQRCode(qr => {
     console.log('\nScan this QR code with WhatsApp:');
     qrcode.generate(qr, { small: true });
+    void writeQrPng(qr);
   });
 
   client.onConnectionUpdate(async state => {

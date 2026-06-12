@@ -226,8 +226,9 @@
 
 ### Implementation for Phase 4.1
 
-- [ ] T064a [US2] Implement `captain-stats connect` command in src/cli/commands/connect.ts: requires team initialized (exit 2 with "run init first" if not); creates Baileys socket with `useDatabaseAuthState(db, teamId, season.id)` (same auth state scope as daemon — no second QR scan after `connect`); displays QR code via `qrcode-terminal` on `qr` event; calls `sock.groupFetchAllParticipating()` after `connection === 'open'`; prints JID and `meta.subject` for each group; calls `await sock.end()` then `process.exit(0)` after listing; logs connection error and exits 4 on close per contracts/cli-interface.md and research.md
-- [ ] T064b [US2] Wire `connect` command to CLI router in src/cli/index.ts (`case 'connect': await connectCommand(); break`)
+- [X] T064a [US2] Implement `captain-stats connect` command in src/cli/commands/connect.ts: requires team initialized (exit 2 with "run init first" if not); creates Baileys socket with `useDatabaseAuthState(db, teamId, season.id)` (same auth state scope as daemon — no second QR scan after `connect`); displays QR code via `qrcode-terminal` on `qr` event; calls `sock.groupFetchAllParticipating()` after `connection === 'open'`; prints JID and `meta.subject` for each group; calls `await sock.end()` then `process.exit(0)` after listing; logs connection error and exits 4 on close per contracts/cli-interface.md and research.md
+- [X] T064b [US2] Wire `connect` command to CLI router in src/cli/index.ts (`case 'connect': await connectCommand(); break`)
+- [X] T064c [US2] Add QR PNG fallback (FR-023) to src/cli/commands/connect.ts and src/cli/commands/daemon.ts: install `qrcode` + `@types/qrcode`; on each `qr` event write `captain-stats-qr.png` to `os.tmpdir()` via `QRCode.toFile()`; print file path to console; attempt auto-open via `xdg-open`/`open` (best-effort, errors silently swallowed); retain `qrcode-terminal` ASCII render as primary output
 
 **Checkpoint**: `captain-stats connect` displays QR, lists groups after scan, exits cleanly. Operator copies correct JID to `.env` as `AUTHORIZED_GROUP_ID`. Daemon starts without second QR scan (shared auth state via database).
 
@@ -516,7 +517,7 @@ Each user story adds value without breaking previous stories.
 - **Phase 3 (US1 - Fixtures)**: 23 tasks
 - **Phase 3.5 (Test Strategy)**: 12 tasks
 - **Phase 4 (US2 - Polls)**: 21 tasks (3 shared utility + 4 tests + 14 implementation)
-- **Phase 4.1 (FR-022 - Connect)**: 2 tasks (manual validation only, no automated tests)
+- **Phase 4.1 (FR-022/FR-023 - Connect + QR PNG)**: 3 tasks (manual validation only, no automated tests)
 - **Phase 5 (US3 - Stats)**: 13 tasks
 - **Phase 6 (US4 - View/Edit)**: 14 tasks
 - **Phase 7 (US5 - Seasons)**: 10 tasks

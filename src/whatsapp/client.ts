@@ -78,7 +78,7 @@ export class WhatsAppClient implements IWhatsAppClient {
 
     this.sock = makeWASocket({
       auth: state,
-      browser: Browsers.ubuntu('CaptainBot'),
+      browser: Browsers.macOS('Chrome'),
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
