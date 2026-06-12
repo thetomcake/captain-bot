@@ -3,13 +3,14 @@
  */
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
 import type { IWhatsAppClient } from '../whatsapp/client.js';
 import { PollManager } from '../whatsapp/poll-manager.js';
 import type { FixtureService } from './fixture-service.js';
 import type { PollVoteResult } from '../types/whatsapp.js';
 import type { Game, Poll } from '../types/entities.js';
+import { logger } from '../utils/logger.js';
 
 export interface PostPollOptions {
   force?: boolean;
@@ -21,14 +22,23 @@ export class PollService {
   constructor(
     private readonly db: BetterSQLite3Database<typeof schema>,
     private readonly fixtureService: FixtureService,
-    client: IWhatsAppClient,
+    private readonly client: IWhatsAppClient,
     private readonly groupJid: string
   ) {
     this.pollManager = new PollManager(client);
   }
 
   /**
-   * Post poll for a specific game; returns message ID or null if skipped/not found
+   * Post poll for a specific game; returns message ID or null if skipped/not found.
+   *
+   * On the create path (no existing poll, or `--force`) this hard-deletes any
+   * existing poll for the game before storing the new one, so a game never has
+   * more than one poll row (FR-024). Ordering is deliberate:
+   *   1. sendPoll()              — a send failure aborts before any DB mutation
+   *   2. removeExistingPollForGame() — cascade-delete old responses + poll row,
+   *                                    best-effort delete the old WhatsApp message
+   *   3. storePoll()             — delete-before-insert keeps the unique(gameId)
+   *                                constraint (T064g) satisfied
    */
   async postPollForGame(
     gameId: number,
@@ -37,11 +47,17 @@ export class PollService {
     const game = await this.fixtureService.getGame(gameId);
     if (!game) return null;
 
-    if (!options.force && (await this.hasPollForGame(gameId))) {
+    const existing = await this.getPoll(gameId);
+    if (!options.force && existing) {
       return null;
     }
 
     const messageId = await this.pollManager.sendPoll(game, this.groupJid);
+
+    if (existing) {
+      await this.removeExistingPollForGame(game);
+    }
+
     await this.storePoll(game, messageId);
     return messageId;
   }
@@ -78,13 +94,18 @@ export class PollService {
   }
 
   /**
-   * Get the poll for a game, or null if none
+   * Get the poll for a game, or null if none.
+   *
+   * The unique(gameId) constraint (T064g) guarantees at most one row; the
+   * `postedAt DESC` ordering is defence-in-depth so the most recent poll always
+   * wins even if a stray duplicate ever slips past the constraint.
    */
   async getPoll(gameId: number): Promise<Poll | null> {
     const [poll] = await this.db
       .select()
       .from(schema.polls)
       .where(eq(schema.polls.gameId, gameId))
+      .orderBy(desc(schema.polls.postedAt))
       .limit(1);
 
     return poll ?? null;
@@ -124,6 +145,36 @@ export class PollService {
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Remove the existing poll for a game (FR-024 replacement): cascade-delete its
+   * responses, then the poll row, then best-effort delete the old WhatsApp
+   * message. A WhatsApp delete failure is logged and swallowed so the
+   * replacement always completes.
+   */
+  private async removeExistingPollForGame(game: Game): Promise<void> {
+    const existing = await this.getPoll(game.id);
+    if (!existing) return;
+
+    // Cascade: responses reference the poll, so they must go first.
+    await this.db
+      .delete(schema.pollResponses)
+      .where(eq(schema.pollResponses.pollId, existing.id));
+
+    await this.db.delete(schema.polls).where(eq(schema.polls.id, existing.id));
+
+    // Best-effort: removing the WhatsApp message is not allowed to fail the
+    // replacement (FR-024). The logger timestamps every line.
+    try {
+      await this.client.deleteMessage(this.groupJid, existing.whatsappMessageId);
+    } catch (error) {
+      logger.warn('Failed to delete old WhatsApp poll message during replacement', {
+        gameId: game.id,
+        whatsappMessageId: existing.whatsappMessageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   private async storePoll(game: Game, messageId: string): Promise<void> {
     await this.db.insert(schema.polls).values({

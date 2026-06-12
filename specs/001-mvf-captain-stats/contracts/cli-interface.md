@@ -202,13 +202,14 @@ captain-stats poll [game-id] [options]
 ```
 
 **Options**:
-- `--force` - Post poll even if already posted
+- `--force` - Replace existing poll (delete the prior poll, its responses, and the WhatsApp message, then repost)
 - `--dry-run` - Show what would be posted without actually posting
 
 **Behavior**:
 - If no `game-id`: posts poll for next scheduled game
 - If `game-id` provided: posts poll for that specific game
 - Checks if poll already posted (skip unless `--force`)
+- With `--force`: hard-deletes the existing poll and cascade-deletes its responses, posts exactly one new poll, and best-effort deletes the old WhatsApp poll message (a deletion failure logs a warning but still completes the replacement). A game never has more than one poll row (FR-024).
 
 **Output**:
 ```

@@ -117,6 +117,10 @@ export const polls = sqliteTable(
     pollOptions: text('poll_options', { mode: 'json' }).notNull().$type<string[]>(),
   },
   (table) => ({
+    // One poll per game (FR-024): replacement hard-deletes the prior poll before
+    // inserting, so this can never legitimately be violated and guards the
+    // duplicate-row bug at the DB layer.
+    uniqueGame: unique().on(table.gameId),
     gameIdx: index('idx_poll_game').on(table.gameId),
     messageIdx: index('idx_poll_message').on(table.whatsappMessageId),
   })

@@ -242,40 +242,43 @@
 
 **Independent Test**: Posting a poll, then posting again with `--force`, leaves exactly one `polls` row for that game, zero orphaned `poll_responses`, and invokes `client.deleteMessage` with the prior message ID; a deletion failure logs a warning and still completes the replacement.
 
-> **Note**: This phase generalizes the FR-021 reschedule tasks T034/T035 (Phase 3, US1) — those should consume the shared `PollService.replacePoll()` routine created here rather than implementing their own cascade-delete.
+> **Note**: This phase generalizes the FR-021 reschedule tasks T034/T035 (Phase 3, US1) — rather than implementing their own cascade-delete, those should call `postPollForGame(gameId, { force: true })` (which removes any existing poll inline before creating the new one).
+>
+> **Design**: Replacement is handled *inline* in `postPollForGame()` — on the create path (no existing poll, or `--force`), remove any existing poll for the game first, then create. No separate `replacePoll()` method, so `--force` and reschedule share one code path. The `polls.gameId` unique constraint (T064g) makes delete-before-insert mandatory at the DB layer regardless.
 
 ### Tests for Phase 4.2 (Test-First)
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T064d [P] [US2] Add `deleteMessage(groupJid, messageId)` recording/spy support to MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (capture calls + allow simulated failure for best-effort assertions)
-- [ ] T064e [P] [US2] Write failing poll-replacement integration tests in tests/integration/whatsapp/poll-service.test.ts (force-replace deletes the old `polls` row, cascade-deletes its `poll_responses`, inserts exactly one new poll, calls `client.deleteMessage` with the old `whatsappMessageId`; when `deleteMessage` rejects, a warning is logged and the replacement still completes per FR-024)
-- [ ] T064f [P] [US2] Write failing contract test in tests/integration/cli/poll-command.test.ts (`poll --force` yields a single poll row for the game, not duplicates; exit 0)
+- [X] T064d [P] [US2] Add `deleteMessage(groupJid, messageId)` recording/spy support to MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (capture calls + allow simulated failure for best-effort assertions)
+- [X] T064e [P] [US2] Write failing poll-replacement integration tests in tests/integration/whatsapp/poll-service.test.ts (calling `postPollForGame` with `{ force: true }` when a poll exists deletes the old `polls` row, cascade-deletes its `poll_responses`, inserts exactly one new poll, and calls `client.deleteMessage` with the old `whatsappMessageId`; when `deleteMessage` rejects, a warning is logged and the replacement still completes per FR-024; when `sendPoll` throws, the existing poll and responses remain intact)
+- [X] T064f [P] [US2] Write failing contract test in tests/integration/cli/poll-command.test.ts (`poll --force` yields a single poll row for the game, not duplicates; exit 0)
 
 ### Implementation for Phase 4.2
 
 #### Schema (H1)
 
-- [ ] T064g [US2] Add `unique().on(polls.gameId)` constraint in src/database/schema.ts (enforce one poll per game per FR-024/data-model.md) and generate migration via drizzle-kit generate
+- [X] T064g [US2] Add `unique().on(polls.gameId)` constraint in src/database/schema.ts (enforce one poll per game per FR-024/data-model.md) and generate migration via drizzle-kit generate
 
 #### WhatsApp Interface (C2)
 
-- [ ] T064h [US2] Add `deleteMessage(groupJid: string, messageId: string): Promise<void>` to `IWhatsAppClient` in src/whatsapp/client.ts; implement in the Baileys client (protocol message revoke / `sock.sendMessage(jid, { delete: key })`); add recording implementation to MockWhatsAppClient
+- [X] T064h [US2] Add `deleteMessage(groupJid: string, messageId: string): Promise<void>` to `IWhatsAppClient` in src/whatsapp/client.ts; implement in the Baileys client (protocol message revoke / `sock.sendMessage(jid, { delete: key })`); add recording implementation to MockWhatsAppClient
 
 #### Service Layer (C1, M1)
 
-- [ ] T064i [US2] Implement `replacePoll(game)` in src/services/poll-service.ts: hard-delete existing poll(s) for the game and cascade-delete their `poll_responses`, best-effort call `client.deleteMessage` with the old `whatsappMessageId` (catch failure, log warning with timestamp, continue per FR-024), then post and store the new poll
-- [ ] T064j [US2] Refactor `postPollForGame()` in src/services/poll-service.ts so the `--force` path calls `replacePoll()` instead of inserting a duplicate (fixes C1); order `getPoll()`/`hasPollForGame()` by `postedAt DESC` as defense-in-depth (M1)
+- [X] T064i [US2] Add a private `removeExistingPollForGame(game)` helper in src/services/poll-service.ts: cascade-delete the game's `poll_responses` then the `polls` row, and best-effort call `client.deleteMessage` with the old `whatsappMessageId` (catch failure, log warning with timestamp, continue per FR-024)
+- [X] T064j [US2] Refactor `postPollForGame()` in src/services/poll-service.ts so the create path (no existing poll, or `--force`) calls `removeExistingPollForGame()` before posting+storing the new poll, in this order: `sendPoll()` → remove existing → `storePoll()` → best-effort message delete (a `sendPoll` failure aborts before any DB mutation; delete-before-insert satisfies the T064g unique constraint); fixes the duplicate-row bug (C1); order `getPoll()`/`hasPollForGame()` by `postedAt DESC` as defense-in-depth (M1)
 
 #### Integration (H2)
 
-- [ ] T064k [US2] Wire the FR-021 reschedule re-poll path (T035) to `PollService.replacePoll()` so reschedule and `poll --force` share a single replace routine
+- [ ] T064k [US2] Wire the FR-021 reschedule re-poll path (T035) to call `postPollForGame(gameId, { force: true })` (after the game record is updated by T033) so reschedule and `poll --force` share one code path — no separate replace routine
+  - **BLOCKED**: T035 (FR-021 reschedule re-poll handler) is not yet implemented — there is no reschedule consumer in production code to wire (`detectFixtureChanges()` surfaces `rescheduled` changes but nothing acts on them). The shared replacement code path is ready: `postPollForGame(gameId, { force: true })` performs the full hard-delete-and-replace, so T035 only needs to call it. Complete this task when implementing T035.
 
 #### Docs & Contract (M2, M3)
 
-- [ ] T064l [US2] Update contracts/cli-interface.md `poll --force` wording to "replace existing poll (delete prior poll, its responses, and the WhatsApp message, then repost)"; update data-model.md Poll/PollResponse business logic and the Data Retention section to document cascade-delete-on-replace
+- [X] T064l [US2] Update contracts/cli-interface.md `poll --force` wording to "replace existing poll (delete prior poll, its responses, and the WhatsApp message, then repost)"; update data-model.md Poll/PollResponse business logic and the Data Retention section to document cascade-delete-on-replace
 
-**Checkpoint**: Phase 4.2 tests pass. `poll --force` and FR-021 reschedule both replace via `PollService.replacePoll()`; exactly one poll per game enforced at the schema level; old WhatsApp poll message deleted on a best-effort basis with a logged warning on failure.
+**Checkpoint**: Phase 4.2 tests pass. `poll --force` and FR-021 reschedule both replace via the same `postPollForGame(..., { force: true })` path; exactly one poll per game enforced at the schema level; old WhatsApp poll message deleted on a best-effort basis with a logged warning on failure.
 
 ---
 
@@ -446,7 +449,7 @@
 - **US1 (P1)**: Fixtures - No dependencies on other stories (after Foundational)
 - **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls); T047a/T047b/T047c create shared utilities also consumed by scraper; Phase 4.1 (T064a/T064b) extends US2 with group discovery command
 - **Phase 4.1 (FR-022)**: Depends on Phase 4 completion (WhatsApp client infrastructure in place); `connect` reuses `useDatabaseAuthState` from T051 and `qrcode-terminal` from T052/T060; must complete before daemon can be configured in production
-- **Phase 4.2 (FR-024)**: Depends on Phase 4 completion (PollService from T056, IWhatsAppClient/MockWhatsAppClient from T047/T052, poll DB ops from T057); generalizes FR-021 reschedule tasks T034/T035 (Phase 3) which should consume `PollService.replacePoll()` — implement Phase 4.2 before completing T034/T035
+- **Phase 4.2 (FR-024)**: Depends on Phase 4 completion (PollService from T056, IWhatsAppClient/MockWhatsAppClient from T047/T052, poll DB ops from T057); generalizes FR-021 reschedule tasks T034/T035 (Phase 3) which should call `postPollForGame(gameId, { force: true })` — implement Phase 4.2 before completing T034/T035
 - **US3 (P3)**: Stat Capture - Depends on US1 (needs game completion status), US2 (WhatsApp client reused via IWhatsAppClient)
 - **US4 (P4)**: View/Edit Stats - Depends on US3 (needs stats to view/edit)
 - **US5 (P5)**: Season Transition - Depends on US1 (fixture management), independent testing possible

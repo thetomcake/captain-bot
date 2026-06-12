@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `polls_game_id_unique` ON `polls` (`game_id`);

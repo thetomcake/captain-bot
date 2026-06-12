@@ -322,7 +322,7 @@ Represents an availability poll posted for a specific game.
 - Has many PollResponses
 
 **Indexes**:
-- Index on `game_id`
+- Unique index on `game_id` - at most one poll per game (FR-024)
 - Index on `whatsapp_message_id` for vote event lookup
 
 **TypeScript Type**:
@@ -341,6 +341,7 @@ type Poll = {
 - Posted automatically day after game completion
 - Or posted manually via CLI command
 - Baileys poll format with selectable options
+- Exactly one poll per game (unique `game_id`). Replacing a poll (manual `poll --force`, or an FR-021 reschedule) hard-deletes the prior poll row and cascade-deletes its `poll_responses`, posts a single new poll, and best-effort deletes the old WhatsApp message — never appends a duplicate row (FR-024)
 
 ---
 
@@ -381,6 +382,7 @@ type PollResponse = {
 - If user votes multiple times, update existing record (replace with latest vote)
 - Captured from WhatsApp `messages.update` event with `pollUpdates`
 - Decrypted using Baileys `getAggregateVotesInPollMessage()`
+- Cascade-deleted when their parent poll is replaced (`poll --force` or FR-021 reschedule) — responses belong to a specific poll instance and do not carry over to the replacement (FR-024)
 
 ---
 
@@ -521,7 +523,7 @@ type WeightDirection = 'up' | 'down' | 'same' | 'unknown';
 - All seasons retained indefinitely (captain's archive)
 - Games never deleted (historical record)
 - Stats never deleted (historical accuracy)
-- Poll responses retained (historical record)
+- Poll responses retained (historical record), **except** on poll replacement: when a poll is replaced (`poll --force` or an FR-021 reschedule), its responses are cascade-deleted along with the old poll because they pertain to the superseded poll instance (FR-024). Responses to the surviving poll are retained as normal.
 - Auth state can be reset per season (different WhatsApp groups)
 
 ### User Data

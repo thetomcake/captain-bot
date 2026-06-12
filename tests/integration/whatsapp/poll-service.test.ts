@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -10,6 +10,7 @@ import { SeasonService } from '#src/services/season-service.js';
 import { FixtureService } from '#src/services/fixture-service.js';
 import { MockFixtureScraper } from '../../helpers/mock-scraper.js';
 import type { PollVoteResult } from '#src/types/whatsapp.js';
+import { logger } from '#src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -195,6 +196,83 @@ describe('PollService Integration Tests', () => {
       const responses = await testDb.db.select().from(schema.pollResponses);
       expect(responses).toHaveLength(1);
       expect(responses[0]!.selectedOption).toBe('No');
+    });
+  });
+
+  describe('poll replacement (FR-024)', () => {
+    /** Post a poll and record one response against it; returns the old message ID. */
+    async function postPollWithResponse(): Promise<string> {
+      const oldMessageId = await pollService.postPollForGame(gameId);
+      const poll = await pollService.getPoll(gameId);
+      await pollService.recordPollResponse(
+        poll!.id,
+        '1234567890@s.whatsapp.net',
+        'Yes'
+      );
+      return oldMessageId!;
+    }
+
+    it('hard-deletes the old poll and cascade-deletes its responses, leaving exactly one poll', async () => {
+      const oldMessageId = await postPollWithResponse();
+
+      await pollService.postPollForGame(gameId, { force: true });
+
+      const polls = await testDb.db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+      // The surviving poll is the new one, not the original
+      expect(polls[0]!.whatsappMessageId).not.toBe(oldMessageId);
+
+      // Responses belonged to the deleted poll and were cascade-removed
+      const responses = await testDb.db.select().from(schema.pollResponses);
+      expect(responses).toHaveLength(0);
+    });
+
+    it('best-effort deletes the old WhatsApp message with the prior message ID', async () => {
+      const oldMessageId = await postPollWithResponse();
+
+      await pollService.postPollForGame(gameId, { force: true });
+
+      expect(client.deletedMessages).toHaveLength(1);
+      expect(client.deletedMessages[0]!.messageId).toBe(oldMessageId);
+      expect(client.deletedMessages[0]!.groupJid).toBe(GROUP_JID);
+    });
+
+    it('logs a warning but still completes replacement when deleteMessage fails', async () => {
+      await postPollWithResponse();
+      client.deleteShouldFail = true;
+      const warnSpy = vi.spyOn(logger, 'warn');
+
+      const result = await pollService.postPollForGame(gameId, { force: true });
+
+      expect(result).not.toBeNull();
+      expect(warnSpy).toHaveBeenCalled();
+
+      // Replacement still happened: exactly one (new) poll remains
+      const polls = await testDb.db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+      expect(polls[0]!.whatsappMessageId).toBe(result);
+
+      warnSpy.mockRestore();
+    });
+
+    it('leaves the existing poll and responses intact when sendPoll throws', async () => {
+      const oldMessageId = await postPollWithResponse();
+      client.failNextSendPoll = true;
+
+      await expect(
+        pollService.postPollForGame(gameId, { force: true })
+      ).rejects.toThrow();
+
+      // No DB mutation occurred — original poll and its response survive
+      const polls = await testDb.db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+      expect(polls[0]!.whatsappMessageId).toBe(oldMessageId);
+
+      const responses = await testDb.db.select().from(schema.pollResponses);
+      expect(responses).toHaveLength(1);
+
+      // Nothing was deleted from WhatsApp either
+      expect(client.deletedMessages).toHaveLength(0);
     });
   });
 

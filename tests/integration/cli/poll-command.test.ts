@@ -130,6 +130,18 @@ describe('CLI Poll Command Tests', () => {
       expect(exitCode).toBe(0);
       expect(mockClient.sentPolls).toHaveLength(2);
     });
+
+    it('should leave exactly one poll row for the game after --force (no duplicates)', async () => {
+      await pollCommand({}, mockClient);
+      exitCode = null;
+
+      await pollCommand({ force: true }, mockClient);
+
+      expect(exitCode).toBe(0);
+      const { db } = getDatabase();
+      const polls = await db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+    });
   });
 
   describe('exit codes', () => {

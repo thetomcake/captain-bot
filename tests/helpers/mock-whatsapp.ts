@@ -17,6 +17,11 @@ export interface SentMessage {
   text: string;
 }
 
+export interface DeletedMessage {
+  groupJid: string;
+  messageId: string;
+}
+
 /**
  * Mock WhatsApp client for service-boundary testing
  * No Baileys imports — implements IWhatsAppClient directly
@@ -24,6 +29,12 @@ export interface SentMessage {
 export class MockWhatsAppClient implements IWhatsAppClient {
   readonly sentPolls: SentPoll[] = [];
   readonly sentMessages: SentMessage[] = [];
+  readonly deletedMessages: DeletedMessage[] = [];
+
+  /** When true, the next sendPoll() call rejects (simulates a WhatsApp send failure). */
+  failNextSendPoll = false;
+  /** When true, every deleteMessage() call rejects (simulates best-effort delete failure). */
+  deleteShouldFail = false;
 
   private connected = false;
   private nextMessageId = 1;
@@ -50,6 +61,10 @@ export class MockWhatsAppClient implements IWhatsAppClient {
   }
 
   async sendPoll(groupJid: string, poll: WhatsAppPoll): Promise<string> {
+    if (this.failNextSendPoll) {
+      this.failNextSendPoll = false;
+      throw new Error('Simulated sendPoll failure');
+    }
     const messageId = `mock-msg-${this.nextMessageId++}`;
     this.sentPolls.push({ groupJid, poll, messageId });
     return messageId;
@@ -57,6 +72,13 @@ export class MockWhatsAppClient implements IWhatsAppClient {
 
   async sendMessage(groupJid: string, text: string): Promise<void> {
     this.sentMessages.push({ groupJid, text });
+  }
+
+  async deleteMessage(groupJid: string, messageId: string): Promise<void> {
+    this.deletedMessages.push({ groupJid, messageId });
+    if (this.deleteShouldFail) {
+      throw new Error('Simulated deleteMessage failure');
+    }
   }
 
   onMessage(handler: (msg: WhatsAppMessage) => void | Promise<void>): void {
@@ -101,6 +123,9 @@ export class MockWhatsAppClient implements IWhatsAppClient {
   reset(): void {
     this.sentPolls.length = 0;
     this.sentMessages.length = 0;
+    this.deletedMessages.length = 0;
+    this.failNextSendPoll = false;
+    this.deleteShouldFail = false;
     this.nextMessageId = 1;
     this.connected = false;
     this.messageHandlers.length = 0;

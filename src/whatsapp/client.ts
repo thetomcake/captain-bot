@@ -33,6 +33,7 @@ export interface IWhatsAppClient {
   isConnected(): boolean;
   sendPoll(groupJid: string, poll: WhatsAppPoll): Promise<string>;
   sendMessage(groupJid: string, text: string): Promise<void>;
+  deleteMessage(groupJid: string, messageId: string): Promise<void>;
   onMessage(handler: (msg: WhatsAppMessage) => void | Promise<void>): void;
   onPollVote(
     handler: (messageId: string, votes: PollVoteResult[]) => void | Promise<void>
@@ -272,6 +273,20 @@ export class WhatsAppClient implements IWhatsAppClient {
     await this.rateLimiter.execute(async () => {
       if (!this.sock) throw new Error('WhatsApp client not connected');
       await this.sock.sendMessage(groupJid, { text });
+    });
+  }
+
+  /**
+   * Revoke (delete-for-everyone) a message we previously sent to the group.
+   * We always send polls ourselves, so the key is reconstructable as fromMe.
+   */
+  async deleteMessage(groupJid: string, messageId: string): Promise<void> {
+    await this.rateLimiter.execute(async () => {
+      if (!this.sock) throw new Error('WhatsApp client not connected');
+      await this.sock.sendMessage(groupJid, {
+        delete: { remoteJid: groupJid, fromMe: true, id: messageId },
+      });
+      this.messageStore.delete(`${groupJid}:${messageId}`);
     });
   }
 
