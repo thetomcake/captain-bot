@@ -234,6 +234,51 @@
 
 ---
 
+## Phase 4.2: FR-024 - Poll Replacement (Hard-Delete-and-Replace)
+
+**Goal**: Replacing a poll (via `poll --force` or FR-021 reschedule detection) hard-deletes the previous poll and cascade-deletes its responses, posts exactly one new poll, and best-effort deletes the old poll message from WhatsApp — never appends duplicate rows.
+
+**Why**: Per 2026-06-12 clarification (FR-024) and `/speckit-analyze` findings — current `postPollForGame()` unconditionally INSERTs a new `polls` row under `--force` (C1), the schema permits multiple polls per game (H1), `IWhatsAppClient` has no message-deletion capability (C2), and no task covers the manual `--force` replace path or best-effort WhatsApp message deletion (H2).
+
+**Independent Test**: Posting a poll, then posting again with `--force`, leaves exactly one `polls` row for that game, zero orphaned `poll_responses`, and invokes `client.deleteMessage` with the prior message ID; a deletion failure logs a warning and still completes the replacement.
+
+> **Note**: This phase generalizes the FR-021 reschedule tasks T034/T035 (Phase 3, US1) — those should consume the shared `PollService.replacePoll()` routine created here rather than implementing their own cascade-delete.
+
+### Tests for Phase 4.2 (Test-First)
+
+> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
+
+- [ ] T064d [P] [US2] Add `deleteMessage(groupJid, messageId)` recording/spy support to MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (capture calls + allow simulated failure for best-effort assertions)
+- [ ] T064e [P] [US2] Write failing poll-replacement integration tests in tests/integration/whatsapp/poll-service.test.ts (force-replace deletes the old `polls` row, cascade-deletes its `poll_responses`, inserts exactly one new poll, calls `client.deleteMessage` with the old `whatsappMessageId`; when `deleteMessage` rejects, a warning is logged and the replacement still completes per FR-024)
+- [ ] T064f [P] [US2] Write failing contract test in tests/integration/cli/poll-command.test.ts (`poll --force` yields a single poll row for the game, not duplicates; exit 0)
+
+### Implementation for Phase 4.2
+
+#### Schema (H1)
+
+- [ ] T064g [US2] Add `unique().on(polls.gameId)` constraint in src/database/schema.ts (enforce one poll per game per FR-024/data-model.md) and generate migration via drizzle-kit generate
+
+#### WhatsApp Interface (C2)
+
+- [ ] T064h [US2] Add `deleteMessage(groupJid: string, messageId: string): Promise<void>` to `IWhatsAppClient` in src/whatsapp/client.ts; implement in the Baileys client (protocol message revoke / `sock.sendMessage(jid, { delete: key })`); add recording implementation to MockWhatsAppClient
+
+#### Service Layer (C1, M1)
+
+- [ ] T064i [US2] Implement `replacePoll(game)` in src/services/poll-service.ts: hard-delete existing poll(s) for the game and cascade-delete their `poll_responses`, best-effort call `client.deleteMessage` with the old `whatsappMessageId` (catch failure, log warning with timestamp, continue per FR-024), then post and store the new poll
+- [ ] T064j [US2] Refactor `postPollForGame()` in src/services/poll-service.ts so the `--force` path calls `replacePoll()` instead of inserting a duplicate (fixes C1); order `getPoll()`/`hasPollForGame()` by `postedAt DESC` as defense-in-depth (M1)
+
+#### Integration (H2)
+
+- [ ] T064k [US2] Wire the FR-021 reschedule re-poll path (T035) to `PollService.replacePoll()` so reschedule and `poll --force` share a single replace routine
+
+#### Docs & Contract (M2, M3)
+
+- [ ] T064l [US2] Update contracts/cli-interface.md `poll --force` wording to "replace existing poll (delete prior poll, its responses, and the WhatsApp message, then repost)"; update data-model.md Poll/PollResponse business logic and the Data Retention section to document cascade-delete-on-replace
+
+**Checkpoint**: Phase 4.2 tests pass. `poll --force` and FR-021 reschedule both replace via `PollService.replacePoll()`; exactly one poll per game enforced at the schema level; old WhatsApp poll message deleted on a best-effort basis with a logged warning on failure.
+
+---
+
 ## Phase 5: User Story 3 - Capture Player Stats from Chat (Priority: P3)
 
 **Goal**: Automatically capture stats (goals, assists, weight, food) from WhatsApp messages
@@ -401,6 +446,7 @@
 - **US1 (P1)**: Fixtures - No dependencies on other stories (after Foundational)
 - **US2 (P2)**: Polls - Depends on US1 (needs fixtures to create polls); T047a/T047b/T047c create shared utilities also consumed by scraper; Phase 4.1 (T064a/T064b) extends US2 with group discovery command
 - **Phase 4.1 (FR-022)**: Depends on Phase 4 completion (WhatsApp client infrastructure in place); `connect` reuses `useDatabaseAuthState` from T051 and `qrcode-terminal` from T052/T060; must complete before daemon can be configured in production
+- **Phase 4.2 (FR-024)**: Depends on Phase 4 completion (PollService from T056, IWhatsAppClient/MockWhatsAppClient from T047/T052, poll DB ops from T057); generalizes FR-021 reschedule tasks T034/T035 (Phase 3) which should consume `PollService.replacePoll()` — implement Phase 4.2 before completing T034/T035
 - **US3 (P3)**: Stat Capture - Depends on US1 (needs game completion status), US2 (WhatsApp client reused via IWhatsAppClient)
 - **US4 (P4)**: View/Edit Stats - Depends on US3 (needs stats to view/edit)
 - **US5 (P5)**: Season Transition - Depends on US1 (fixture management), independent testing possible
@@ -518,16 +564,17 @@ Each user story adds value without breaking previous stories.
 - **Phase 3.5 (Test Strategy)**: 12 tasks
 - **Phase 4 (US2 - Polls)**: 21 tasks (3 shared utility + 4 tests + 14 implementation)
 - **Phase 4.1 (FR-022/FR-023 - Connect + QR PNG)**: 3 tasks (manual validation only, no automated tests)
+- **Phase 4.2 (FR-024 - Poll Replacement)**: 9 tasks (3 tests + 6 implementation; test-first)
 - **Phase 5 (US3 - Stats)**: 13 tasks
 - **Phase 6 (US4 - View/Edit)**: 14 tasks
 - **Phase 7 (US5 - Seasons)**: 10 tasks
 - **Phase 8 (Polish)**: 24 tasks
 
-**Total**: 141 tasks
+**Total**: 150 tasks
 
 **By User Story**:
 - US1: 23 tasks (MVP scope - includes FR-021 fixture rescheduling)
-- US2: 23 tasks (includes 3 shared utility tasks: T047a, T047b, T047c + 2 Phase 4.1 connect tasks: T064a, T064b)
+- US2: 32 tasks (includes 3 shared utility tasks: T047a, T047b, T047c + 3 Phase 4.1 connect tasks: T064a, T064b, T064c + 9 Phase 4.2 poll-replacement tasks: T064d–T064l)
 - US3: 13 tasks
 - US4: 14 tasks
 - US5: 10 tasks

@@ -179,7 +179,7 @@ async function main(): Promise<void> {
 
     case 'connect': {
       const { connectCommand } = await import('./commands/connect.js');
-      await connectCommand();
+      await connectCommand({ reset: parsed.reset as boolean | undefined });
       break;
     }
 

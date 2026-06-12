@@ -10,6 +10,7 @@ import makeWASocket, {
   Browsers,
   getAggregateVotesInPollMessage,
   type WAMessage,
+  type WAMessageKey,
 } from '@whiskeysockets/baileys';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../database/schema.js';
@@ -44,6 +45,19 @@ export interface IWhatsAppClient {
 // Real Baileys-backed implementation (not unit tested — requires QR auth)
 // ============================================================================
 
+/**
+ * After a fresh QR pairing, WhatsApp closes the bootstrap socket with a 515
+ * "restartRequired" and expects an immediate reconnect. This is always a
+ * pre-open handshake step, so connect() retries through it. Bound the retries
+ * so a server stuck in a restart loop fails loudly instead of spinning forever.
+ */
+const MAX_RESTART_HANDSHAKES = 5;
+
+/** Extract the Boom status code from a Baileys disconnect, if present. */
+function disconnectStatusCode(lastDisconnect: { error?: unknown } | undefined): number | undefined {
+  return (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+}
+
 export class WhatsAppClient implements IWhatsAppClient {
   private sock: ReturnType<typeof makeWASocket> | null = null;
   private connected = false;
@@ -69,51 +83,99 @@ export class WhatsAppClient implements IWhatsAppClient {
     this.rateLimiter = new RateLimiter({ minDelay: minMessageDelay });
   }
 
+  /**
+   * Connect and resolve once the socket is genuinely open and usable.
+   *
+   * A fresh pairing closes with 515 (restartRequired) and expects an immediate
+   * reconnect with the now-saved credentials; we loop through those handshakes
+   * until we either open or hit a non-recoverable close (which rejects).
+   */
   async connect(): Promise<void> {
+    for (let attempt = 0; attempt <= MAX_RESTART_HANDSHAKES; attempt++) {
+      if ((await this.openOnce()) === 'open') return;
+      // 'restartRequired' → loop: reload saved creds, open a fresh socket
+    }
+    throw new Error('WhatsApp restart handshake did not complete after multiple attempts');
+  }
+
+  /**
+   * Build a socket, wire its listeners, and resolve on the FIRST terminal
+   * connection event for THAT socket:
+   *   - 'open'            → connected and usable
+   *   - 'restartRequired' → server wants a reconnect (caller loops)
+   * Rejects on any other close (logged out, connection failure).
+   *
+   * Each call owns its own Promise, so it settles exactly once by construction —
+   * a later event on a discarded socket can only no-op an already-settled Promise.
+   */
+  private async openOnce(): Promise<'open' | 'restartRequired'> {
     const { state, saveCreds } = await useDatabaseAuthState(
       this.db,
       this.teamId,
       this.seasonId
     );
 
-    this.sock = makeWASocket({
+    const sock = makeWASocket({
       auth: state,
       browser: Browsers.macOS('Chrome'),
       syncFullHistory: false,
       markOnlineOnConnect: false,
+      // Required by Baileys to decrypt poll votes: it looks the original poll
+      // message up by key to recover the messageSecret. Without this, incoming
+      // `pollUpdates` stay encrypted and aggregate to nothing.
+      getMessage: async (key: WAMessageKey) => this.getStoredMessage(key),
     });
+    this.sock = sock;
 
-    this.sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', saveCreds);
+    this.wireMessageListeners(sock);
 
-    this.sock.ev.on('connection.update', async update => {
-      const { connection, qr, lastDisconnect } = update;
+    return new Promise<'open' | 'restartRequired'>((resolve, reject) => {
+      sock.ev.on('connection.update', async ({ connection, qr, lastDisconnect }) => {
+        if (qr) {
+          this.qrHandlers.forEach(h => h(qr));
+        }
 
-      if (qr) {
-        this.qrHandlers.forEach(h => h(qr));
+        if (connection === 'open') {
+          this.connected = true;
+          resolve('open');
+          await this.notify('connected');
+        } else if (connection === 'close') {
+          this.connected = false;
+          const code = disconnectStatusCode(lastDisconnect);
+
+          if (code === DisconnectReason.restartRequired) {
+            resolve('restartRequired');
+            return;
+          }
+
+          const connState: ConnectionState =
+            code === DisconnectReason.loggedOut ? 'disconnected' : 'close';
+          reject(new Error(connState === 'disconnected' ? 'Logged out' : 'Connection closed'));
+          await this.notify(connState);
+        }
+      });
+    });
+  }
+
+  /** Translate Baileys message/poll-vote events into our domain handler arrays. */
+  private wireMessageListeners(sock: ReturnType<typeof makeWASocket>): void {
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      // Store every upserted message regardless of `type`. Polls we send are
+      // echoed back with type 'append' (not 'notify'); that echo is the only
+      // copy of the poll-creation message, and getMessage()/vote aggregation
+      // both need it. Filtering on 'notify' here was dropping it.
+      for (const msg of messages) {
+        if (!msg.key.remoteJid || !msg.key.id) continue;
+        this.messageStore.set(`${msg.key.remoteJid}:${msg.key.id}`, msg);
       }
 
-      if (connection === 'open') {
-        this.connected = true;
-        for (const h of this.connectionHandlers) await h('connected');
-      } else if (connection === 'close') {
-        this.connected = false;
-        const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output
-          ?.statusCode;
-        const state: ConnectionState =
-          statusCode === DisconnectReason.loggedOut ? 'disconnected' : 'close';
-        for (const h of this.connectionHandlers) await h(state);
-      }
-    });
-
-    this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      // Only `notify` carries new inbound activity to route to handlers.
       if (type !== 'notify') return;
 
       for (const msg of messages) {
         const remoteJid = msg.key.remoteJid;
         if (!remoteJid || !msg.key.id) continue;
-
-        const storeKey = `${remoteJid}:${msg.key.id}`;
-        this.messageStore.set(storeKey, msg);
 
         if (remoteJid !== this.authorizedGroupId) continue;
 
@@ -135,7 +197,7 @@ export class WhatsAppClient implements IWhatsAppClient {
       }
     });
 
-    this.sock.ev.on('messages.update', async updates => {
+    sock.ev.on('messages.update', async updates => {
       for (const { key, update } of updates) {
         if (!update.pollUpdates?.length || !key.remoteJid || !key.id) continue;
 
@@ -157,6 +219,17 @@ export class WhatsAppClient implements IWhatsAppClient {
         for (const h of this.pollVoteHandlers) await h(key.id, votes);
       }
     });
+  }
+
+  /** Look a stored message up by key for Baileys' getMessage (poll decryption). */
+  private getStoredMessage(key: WAMessageKey): NonNullable<WAMessage['message']> | undefined {
+    if (!key.remoteJid || !key.id) return undefined;
+    return this.messageStore.get(`${key.remoteJid}:${key.id}`)?.message ?? undefined;
+  }
+
+  /** Fire-and-forget notification of connection-state change to subscribers. */
+  private async notify(state: ConnectionState): Promise<void> {
+    for (const h of this.connectionHandlers) await h(state);
   }
 
   async disconnect(): Promise<void> {
@@ -186,6 +259,10 @@ export class WhatsAppClient implements IWhatsAppClient {
       if (!result?.key?.id) {
         throw new Error('Failed to send poll — no message ID returned');
       }
+
+      // Persist the poll-creation message immediately so vote decryption works
+      // even if the first vote arrives before Baileys echoes the sent message.
+      this.messageStore.set(`${groupJid}:${result.key.id}`, result);
 
       return result.key.id;
     });

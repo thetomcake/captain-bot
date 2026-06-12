@@ -293,38 +293,48 @@ sock.ev.on('messages.upsert', async ({ messages, type }) => {
 
 **Poll Creation and Vote Tracking**
 
+> **Correction (2026-06-12)** — the original pattern below was implemented but
+> silently dropped every vote. Two non-obvious Baileys requirements were missing.
+> See "Poll vote decryption requirements" immediately after the snippet.
+
 ```typescript
 import { getAggregateVotesInPollMessage, proto } from '@whiskeysockets/baileys';
 
-// Store messages for poll decryption
+// Store messages for poll decryption — populated from EVERY messages.upsert
+// (any `type`) plus the result of our own sendMessage, so the poll-creation
+// message is always retrievable by key.
 const messageStore = new Map<string, proto.IWebMessageInfo>();
 
-const getMessage = async (key: any) => {
-  const storeKey = `${key.remoteJid}:${key.id}`;
-  return messageStore.get(storeKey)?.message;
-};
+const getMessage = async (key: WAMessageKey) =>
+  messageStore.get(`${key.remoteJid}:${key.id}`)?.message ?? undefined;
 
-// Create poll
-await sock.sendMessage(groupJid, {
+// getMessage is REQUIRED here — Baileys uses it to recover the poll's
+// messageSecret and decrypt incoming votes. Omit it and pollUpdates stay empty.
+const sock = makeWASocket({ auth: state, getMessage /* …other opts */ });
+
+// Create poll — store the returned message so the first vote can be decrypted
+// even before Baileys echoes the sent message back.
+const sent = await sock.sendMessage(groupJid, {
   poll: {
     name: 'Available for next game?',
     values: ['Yes', 'No', 'Maybe'],
     selectableCount: 1,
   },
 });
+messageStore.set(`${groupJid}:${sent.key.id}`, sent);
 
 // Track votes
 sock.ev.on('messages.update', async (updates) => {
   for (const { key, update } of updates) {
     if (update.pollUpdates) {
       const pollMessage = await getMessage(key);
-      
+
       if (pollMessage) {
         const votes = getAggregateVotesInPollMessage({
           message: pollMessage,
           pollUpdates: update.pollUpdates,
         });
-        
+
         // votes = [{ name: 'Yes', voters: ['1234@s.whatsapp.net'] }, ...]
         await processPollResults(votes);
       }
@@ -332,6 +342,28 @@ sock.ev.on('messages.update', async (updates) => {
   }
 });
 ```
+
+**Poll vote decryption requirements (the two easy-to-miss pieces)**
+
+1. **`getMessage` must be set on `makeWASocket`.** Per the Baileys docs it is a
+   core config property "needed for resending missing messages or decrypting
+   poll votes" — Baileys calls it to look the poll-creation message up by key
+   and recover its `messageSecret`. Without it, `update.pollUpdates` never
+   decrypts and `getAggregateVotesInPollMessage` aggregates to nothing.
+2. **The poll-creation message must actually be in the store.** A poll we send
+   is echoed back through `messages.upsert` with `type: 'append'`, **not**
+   `'notify'`. Any `if (type !== 'notify') return` guard at the top of the
+   upsert handler therefore discards the only copy of the poll message. Store
+   on every upsert regardless of `type` (and gate only the *domain dispatch* on
+   `notify`), and additionally store the message returned by `sendMessage`.
+
+**LID note**: in LID-addressed groups the voter JIDs surface as `…@lid` rather
+than `…@s.whatsapp.net`. This does not block decryption (votes are keyed off the
+poll-creation message, not the group), but downstream code that keys users by
+JID should treat `@lid` and `@s.whatsapp.net` identities as belonging to the
+same person. Poll-vote decryption for LID groups has churned across recent
+Baileys releases (disabled then re-enabled with corrected JID handling) — see
+issues #1678 and #2342.
 
 ### Alternatives Considered
 
@@ -374,6 +406,11 @@ describe('WhatsApp Message Handler', () => {
 ### References
 
 - [Baileys Documentation](https://baileys.wiki/docs/intro/)
+- [Baileys socket configuration — `getMessage` requirement](https://baileys.wiki/docs/socket/configuration/)
+- [`getAggregateVotesInPollMessage` API](https://baileys.wiki/docs/api/functions/getAggregateVotesInPollMessage/)
+- [Baileys #2158 — poll votes not decrypting](https://github.com/WhiskeySockets/Baileys/issues/2158)
+- [Baileys #1344 — getAggregateVotesInPollMessage returns nothing](https://github.com/WhiskeySockets/Baileys/issues/1344)
+- [Baileys #1678 / #2342 — poll vote decryption in LID groups](https://github.com/WhiskeySockets/Baileys/issues/2342)
 - [baileys-redis-auth GitHub](https://github.com/hbinduni/baileys-redis-auth)
 - [baileys-antiban GitHub](https://github.com/kobie3717/baileys-antiban)
 - [WhatsApp API Rate Limits Guide](https://www.wasenderapi.com/blog/whatsapp-api-rate-limits-explained-how-to-scale-messaging-safely-in-2025)

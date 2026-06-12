@@ -24,6 +24,9 @@
 - Q: Where should the discovered group JID be persisted after the connect command? → A: Print to console only — operator manually adds `AUTHORIZED_GROUP_ID=<jid>` to `.env`; no programmatic file or database write
 - Q: Should Phase 4.1 include retroactive test coverage for QR display changes added to daemon.ts outside the task process? → A: Accept daemon QR display as-is (interactive hardware, excluded from test suite per constitution); Phase 4.1 only covers the new `connect` command and its own tests
 - Q: How should the QR code be displayed for operators whose terminal cannot render a scannable QR code? → A: Write a PNG file (`captain-stats-qr.png`) to the OS temp directory (`os.tmpdir()`) alongside the terminal ASCII render; print the file path to console; attempt auto-open with the platform's native image viewer (xdg-open on Linux, open on macOS); applies to both `connect` and `daemon` commands; PNG is refreshed on each new QR event (Baileys re-emits on expiry)
+- Q: When a previous poll is replaced (via `poll --force` or rescheduled-fixture detection), what happens to its recorded poll responses? → A: Cascade delete all responses belonging to the old poll along with the poll itself
+- Q: Should the hard-delete-and-replace behavior apply to both `poll --force` and FR-021 automatic reschedule detection, or only to `poll --force`? → A: Both — replacing a poll always hard-deletes the old poll (and cascades its responses); soft-delete "superseded" marking is removed
+- Q: When the system cannot delete the old poll message from WhatsApp (deletion window passed, network failure, message already gone), how should it proceed? → A: Log a warning and continue with the database deletion and new poll (best-effort WhatsApp deletion; never block or abort)
 
 ### Session 2026-06-11
 
@@ -126,7 +129,8 @@ As a team captain, I need the system to automatically recognize when a new seaso
 ### Edge Cases
 
 - When the club website is unavailable during the daily 6 AM check, the system skips the check and retries at the next scheduled check 24 hours later (captain can trigger manual refresh if urgent)
-- When a fixture is rescheduled after a poll has been posted, the system automatically posts a new poll with updated fixture details and marks the old poll as superseded
+- When a fixture is rescheduled after a poll has been posted, the system replaces the poll: it hard-deletes the old poll and its responses from the database, best-effort deletes the old poll message from WhatsApp, and posts a new poll with updated fixture details (per FR-021/FR-024)
+- When the system cannot delete an old poll message from WhatsApp (deletion window expired, network failure, or message already removed), it logs a warning with timestamp and proceeds with the database deletion and new poll; WhatsApp message deletion is best-effort and never blocks the replacement
 - When a player edits or deletes a WhatsApp message containing stats, the edit/delete is ignored; players can send a new message within the 3-day window to override their previous stats
 - How does the system handle ambiguous stat messages like "think I got 2" or "maybe assisted"? (Handled by FR-013: confidence scoring below 70% threshold results in no capture)
 - When multiple players each claim goals for the same game, all claims are accepted without verification; captain reviews and corrects totals manually via FR-019 if needed
@@ -160,7 +164,8 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **FR-018**: Captain MUST be able to view recorded stats for any game in current or previous seasons
 - **FR-019**: Captain MUST be able to correct recorded stats, including for past seasons
 - **FR-020**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, errors) to provide full audit trail for debugging and monitoring
-- **FR-021**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, automatically post a new poll with updated fixture details, and mark the old poll as superseded
+- **FR-021**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, then replace the existing poll using the same hard-delete-and-replace process defined in FR-024 (delete the old poll and its responses from the database, best-effort delete the old poll message from WhatsApp, and post a new poll with updated fixture details)
+- **FR-024**: When a poll is replaced — whether triggered manually via `poll --force` or automatically via FR-021 reschedule detection — the system MUST hard-delete the previous poll record and cascade-delete all poll responses belonging to it (no orphaned responses, no soft-delete/superseded marker, no future updates to the deleted poll); the system MUST then attempt to delete the previous poll message from WhatsApp on a best-effort basis, and if deletion fails (deletion window passed, network failure, message already gone) MUST log a warning with timestamp and continue with the database deletion and new poll rather than blocking, retrying, or aborting
 - **FR-022**: System MUST provide a `captain-stats connect` command that connects to WhatsApp (displaying a QR code for the operator to scan), lists all WhatsApp groups the authenticated account belongs to (name and JID), and outputs each group JID to console so the operator can identify and set `AUTHORIZED_GROUP_ID` in their `.env` before running the daemon; no group JID is persisted automatically — the operator copies it manually
 - **FR-023**: When displaying a WhatsApp QR code (in `connect` or `daemon` commands), the system MUST render the code both as ASCII art in the terminal AND as a PNG file (`captain-stats-qr.png`) saved to the OS temp directory (`os.tmpdir()`); the PNG file path MUST be printed to console; the system MUST attempt to auto-open the PNG with the platform's native image viewer (xdg-open on Linux, open on macOS); the PNG MUST be refreshed on each new QR event so it stays current if the previous code expires
 
@@ -170,8 +175,8 @@ As a team captain, I need the system to automatically recognize when a new seaso
 - **Season**: A numbered season representing a distinct competition period; historic seasons are retained indefinitely
 - **Game**: A fixture for the team including: date, time, opponent, venue, and link to the season
 - **WhatsApp User**: The player identity used for attributing stats and poll responses
-- **Poll**: An availability poll posted for a specific fixture
-- **Poll Response**: A user's answer to a specific poll
+- **Poll**: An availability poll posted for a specific fixture; at most one active poll exists per fixture — replacing a poll hard-deletes the prior poll record rather than retaining a superseded copy
+- **Poll Response**: A user's answer to a specific poll; responses are owned by their poll and are cascade-deleted when that poll is deleted (no orphaned responses)
 - **Stat Record**: Per WhatsApp user, per game: goals (integer), assists (integer), weight direction (`up`/`down`/`same`/`unknown`), food tracking (`yes`/`no`)
 
 ## Success Criteria *(mandatory)*
