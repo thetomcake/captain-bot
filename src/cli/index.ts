@@ -128,6 +128,54 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'poll': {
+      if (parsed.help) {
+        console.log('Usage: captain-stats poll [game-id] [options]');
+        console.log('');
+        console.log('Post availability poll to WhatsApp group');
+        console.log('');
+        console.log('Options:');
+        console.log('  --force      Post poll even if already posted');
+        console.log('  --dry-run    Show what would be posted without posting');
+        console.log('  --config     Config file path');
+        console.log('  --help       Show this help message');
+        process.exit(0);
+        break;
+      }
+
+      const { pollCommand } = await import('./commands/poll.js');
+      await pollCommand({
+        gameId: parsed._[1] ? parseInt(String(parsed._[1])) : undefined,
+        force: parsed.force as boolean | undefined,
+        dryRun: parsed['dry-run'] as boolean | undefined,
+        json: parsed.json as boolean | undefined,
+      });
+      break;
+    }
+
+    case 'daemon': {
+      if (parsed.help) {
+        console.log('Usage: captain-stats daemon [options]');
+        console.log('');
+        console.log('Run WhatsApp monitoring daemon');
+        console.log('');
+        console.log('Options:');
+        console.log('  --foreground, -f  Run in foreground (default)');
+        console.log('  --log <path>      Log file path');
+        console.log('  --config          Config file path');
+        console.log('  --help            Show this help message');
+        process.exit(0);
+        break;
+      }
+
+      const { daemonCommand } = await import('./commands/daemon.js');
+      await daemonCommand({
+        foreground: parsed.foreground as boolean | undefined,
+        log: parsed.log as string | undefined,
+      });
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
       console.error('Run "captain-stats" to see available commands');

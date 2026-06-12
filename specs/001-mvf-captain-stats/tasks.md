@@ -176,41 +176,41 @@
 
 ### Shared Utilities (Phase 4 prerequisite — extracted from scraper, reused by WhatsApp)
 
-- [ ] T047a [P] [US2] Create shared exponential backoff utility in src/utils/retry.ts (configurable maxRetries, baseDelay, retryable HTTP status codes; replaces inline retry logic in fixture scraper)
-- [ ] T047b [P] [US2] Create shared rate-limiter utility in src/utils/rate-limiter.ts (configurable minDelay, maxConcurrent; replaces inline rate-limiting in fixture scraper)
-- [ ] T047c [US2] Refactor src/scraping/fixture-scraper.ts to use shared src/utils/retry.ts and src/utils/rate-limiter.ts (removes duplicated retry/rate-limit code added in T029)
+- [X] T047a [P] [US2] Create shared exponential backoff utility in src/utils/retry.ts (configurable maxRetries, baseDelay, retryable HTTP status codes; replaces inline retry logic in fixture scraper)
+- [X] T047b [P] [US2] Create shared rate-limiter utility in src/utils/rate-limiter.ts (configurable minDelay, maxConcurrent; replaces inline rate-limiting in fixture scraper)
+- [X] T047c [US2] Refactor src/scraping/fixture-scraper.ts to use shared src/utils/retry.ts and src/utils/rate-limiter.ts (removes duplicated retry/rate-limit code added in T029)
 
 ### Tests for User Story 2 (Test-First)
 
-- [ ] T047 [P] [US2] Define IWhatsAppClient interface in src/whatsapp/client.ts and create MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (service boundary mock per spec.md clarification — no vi.mock of Baileys; client.ts internals are not unit-tested as QR auth is interactive)
-- [ ] T048 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking using MockWhatsAppClient from T047)
-- [ ] T049 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with MockWhatsAppClient)
-- [ ] T050 [P] [US2] Create CLI poll command contract tests in tests/integration/cli/poll-command.test.ts per cli-interface.md
+- [X] T047 [P] [US2] Define IWhatsAppClient interface in src/whatsapp/client.ts and create MockWhatsAppClient in tests/helpers/mock-whatsapp.ts (service boundary mock per spec.md clarification — no vi.mock of Baileys; client.ts internals are not unit-tested as QR auth is interactive)
+- [X] T048 [P] [US2] Create poll manager unit tests in tests/unit/whatsapp/poll-manager.test.ts (poll formatting, posting, response tracking using MockWhatsAppClient from T047)
+- [X] T049 [P] [US2] Create poll service integration tests in tests/integration/whatsapp/poll-service.test.ts (end-to-end poll flow with MockWhatsAppClient)
+- [X] T050 [P] [US2] Create CLI poll command contract tests in tests/integration/cli/poll-command.test.ts per cli-interface.md
 
 ### Implementation for User Story 2
 
 #### WhatsApp Integration
 
-- [ ] T051 [US2] Implement database-backed auth state in src/whatsapp/auth.ts per research.md (BufferJSON serialization, Drizzle storage)
-- [ ] T052 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management; exposes IWhatsAppClient interface for service-boundary mocking per spec.md clarification)
-- [ ] T053 [US2] Implement poll manager in src/whatsapp/poll-manager.ts (create polls, format messages, post to group per research.md poll pattern)
-- [ ] T054 [US2] Implement message handler in src/whatsapp/message-handler.ts (group filtering, poll response capture per research.md)
-- [ ] T055 [US2] Add rate limiting to WhatsApp operations in src/whatsapp/client.ts using shared src/utils/rate-limiter.ts (1 msg/12 seconds = 5 msg/minute per research.md)
+- [X] T051 [US2] Implement database-backed auth state in src/whatsapp/auth.ts per research.md (BufferJSON serialization, Drizzle storage)
+- [X] T052 [US2] Create WhatsApp client wrapper in src/whatsapp/client.ts (Baileys initialization, QR code display, connection management; exposes IWhatsAppClient interface for service-boundary mocking per spec.md clarification)
+- [X] T053 [US2] Implement poll manager in src/whatsapp/poll-manager.ts (create polls, format messages, post to group per research.md poll pattern)
+- [X] T054 [US2] Implement message handler in src/whatsapp/message-handler.ts (group filtering, poll response capture per research.md)
+- [X] T055 [US2] Add rate limiting to WhatsApp operations in src/whatsapp/client.ts using shared src/utils/rate-limiter.ts (1 msg/12 seconds = 5 msg/minute per research.md)
 
 #### Service Layer
 
-- [ ] T056 [US2] Implement PollService in src/services/poll-service.ts (schedule poll, post poll, track responses)
-- [ ] T057 [US2] Add poll database operations: insert poll record, upsert poll responses per data-model.md
-- [ ] T058 [US2] Add WhatsApp user database operations: create/update users from JID per data-model.md
+- [X] T056 [US2] Implement PollService in src/services/poll-service.ts (schedule poll, post poll, track responses)
+- [X] T057 [US2] Add poll database operations: insert poll record, upsert poll responses per data-model.md
+- [X] T058 [US2] Add WhatsApp user database operations: create/update users from JID per data-model.md
 
 #### CLI and Daemon
 
-- [ ] T059 [US2] Implement `captain-stats poll` command in src/cli/commands/poll.ts per cli-interface.md
-- [ ] T060 [US2] Implement daemon mode in src/cli/commands/daemon.ts (WhatsApp connection, message monitoring, graceful shutdown per research.md)
-- [ ] T061 [US2] Add scheduled poll posting logic (day after game completion) using Croner per research.md
-- [ ] T062 [US2] Wire poll command to CLI router in src/cli/index.ts
-- [ ] T063 [US2] Wire daemon command to CLI router in src/cli/index.ts
-- [ ] T064 [US2] Add validation and error handling for US2 commands
+- [X] T059 [US2] Implement `captain-stats poll` command in src/cli/commands/poll.ts per cli-interface.md
+- [X] T060 [US2] Implement daemon mode in src/cli/commands/daemon.ts (WhatsApp connection, message monitoring, graceful shutdown per research.md)
+- [X] T061 [US2] Add scheduled poll posting logic (day after game completion) using Croner per research.md
+- [X] T062 [US2] Wire poll command to CLI router in src/cli/index.ts
+- [X] T063 [US2] Wire daemon command to CLI router in src/cli/index.ts
+- [X] T064 [US2] Add validation and error handling for US2 commands
 
 **Checkpoint**: User Story 2 automated tests pass. Present the manual validation steps above to the user before marking Phase 4 complete — QR authentication and live poll posting must be verified on real hardware.
 

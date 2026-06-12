@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import PQueue from 'p-queue';
+import { withRetry } from '../utils/retry.js';
 
 export interface Fixture {
   date: string; // ISO format YYYY-MM-DD
@@ -185,69 +186,26 @@ export function scrapeFixtures(html: string): Fixture[] {
 }
 
 /**
- * Sleep for specified milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Fetch with retry and exponential backoff
- * @param url - URL to fetch
- * @param maxRetries - Maximum retry attempts (default: 3)
- * @param baseDelay - Base delay in milliseconds (default: 1000)
- * @returns Axios response
+ * Fetch URL using shared retry utility
  */
 async function fetchWithRetry(
   url: string,
   maxRetries = 3,
   baseDelay = 1000
 ): Promise<string> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await axios.get(url, {
+  return withRetry(
+    async () => {
+      const response = await axios.get<string>(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; CaptainStats/1.0)',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
-        timeout: 10000, // 10 second timeout
+        timeout: 10000,
       });
-
       return response.data;
-    } catch (error) {
-      const isLastAttempt = attempt === maxRetries - 1;
-
-      // Don't retry on client errors (4xx) - throw immediately
-      if (axios.isAxiosError(error) && error.response) {
-        const status = error.response.status;
-        if (status >= 400 && status < 500) {
-          throw new Error(`HTTP ${status} fetching fixtures from ${url}`);
-        }
-      }
-
-      // If this is the last attempt, throw with detailed error message
-      if (isLastAttempt) {
-        if (axios.isAxiosError(error)) {
-          if (error.code === 'ECONNABORTED') {
-            throw new Error(`Timeout fetching fixtures from ${url}`);
-          }
-          if (error.response) {
-            throw new Error(`HTTP ${error.response.status} fetching fixtures from ${url}`);
-          }
-          throw new Error(`Network error fetching fixtures: ${error.message}`);
-        }
-        throw error instanceof Error ? error : new Error(String(error));
-      }
-
-      // Exponential backoff: 1s, 2s, 4s
-      const delay = baseDelay * Math.pow(2, attempt);
-      console.warn(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
-      await sleep(delay);
-    }
-  }
-
-  // Should never reach here (all paths throw or return)
-  throw new Error(`Failed to fetch fixtures from ${url}`);
+    },
+    { maxRetries, baseDelay }
+  );
 }
 
 /**
