@@ -11,7 +11,7 @@ import { logger } from '../../utils/logger.js';
 import { Cron } from 'croner';
 
 const _require = createRequire(import.meta.url);
-const { version } = _require('../../package.json') as { version: string };
+const { version } = _require('../../../package.json') as { version: string };
 
 export interface DaemonCommandOptions {
   foreground?: boolean;
