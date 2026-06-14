@@ -47,21 +47,28 @@ export const NOOP_LOGGER: Logger = {
 
 /**
  * Validate a consumer config and resolve defaults.
- * @throws Error if `authorizedGroups` is empty or contains a non-group JID.
+ *
+ * `authorizedGroups` is an inbound-filtering concern (FR-017), not a connection
+ * prerequisite, so it is **optional** and defaults to `[]` — auth-only / group-discovery
+ * entry points (`connect`, `force-reauth`, `list-groups`) need no group. Any entry that IS
+ * supplied must be a group JID (FR-018). Group-dependent operations (inbound dispatch,
+ * send, polls) are responsible for failing clearly when the list is empty.
+ *
+ * @throws Error if `authorizedGroups` contains a non-group JID.
  */
 export function resolveConfig(config: GatewayConfig): ResolvedGatewayConfig {
-  const { authorizedGroups } = config;
+  const authorizedGroups = config.authorizedGroups ?? [];
 
-  if (!Array.isArray(authorizedGroups) || authorizedGroups.length === 0) {
+  if (!Array.isArray(authorizedGroups)) {
     throw new Error(
-      'GatewayConfig.authorizedGroups must contain at least one group JID (…@g.us) (FR-017).',
+      'GatewayConfig.authorizedGroups must be an array of group JIDs (…@g.us) (FR-017).'
     );
   }
 
   for (const jid of authorizedGroups) {
     if (!isJidGroup(jid)) {
       throw new Error(
-        `GatewayConfig.authorizedGroups entry "${jid}" is not a group JID (…@g.us) (FR-018).`,
+        `GatewayConfig.authorizedGroups entry "${jid}" is not a group JID (…@g.us) (FR-018).`
       );
     }
   }

@@ -5,11 +5,20 @@ import type { GatewayConfig } from '#src/whatsapp-gateway/types.js';
 const GROUP = '120363000000000000@g.us';
 
 describe('resolveConfig (FR-017/FR-018)', () => {
-  it('rejects an empty authorizedGroups array', () => {
-    expect(() => resolveConfig({ authorizedGroups: [] })).toThrow();
+  it('allows an omitted authorizedGroups, defaulting to an empty list', () => {
+    // authorizedGroups is an inbound-filtering concern, not a connection prerequisite:
+    // auth-only / group-discovery use (connect, force-reauth, list-groups) needs none.
+    // Empty is safe-by-default — the receive filter then rejects all inbound.
+    const resolved = resolveConfig({});
+    expect(resolved.authorizedGroups).toEqual([]);
   });
 
-  it('rejects an authorizedGroups entry that is not a group JID', () => {
+  it('allows an explicitly empty authorizedGroups array', () => {
+    expect(() => resolveConfig({ authorizedGroups: [] })).not.toThrow();
+    expect(resolveConfig({ authorizedGroups: [] }).authorizedGroups).toEqual([]);
+  });
+
+  it('still rejects an authorizedGroups entry that is not a group JID', () => {
     // A phone-number user JID is not a group.
     expect(() => resolveConfig({ authorizedGroups: ['12345678901@s.whatsapp.net'] })).toThrow();
     // Garbage is not a group.
@@ -20,7 +29,7 @@ describe('resolveConfig (FR-017/FR-018)', () => {
 
   it('rejects when at least one entry is a non-group JID even if others are valid', () => {
     expect(() =>
-      resolveConfig({ authorizedGroups: [GROUP, '12345678901@s.whatsapp.net'] }),
+      resolveConfig({ authorizedGroups: [GROUP, '12345678901@s.whatsapp.net'] })
     ).toThrow();
   });
 

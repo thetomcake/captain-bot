@@ -5,7 +5,9 @@ This is the **entire surface** the Gateway exposes to a consumer (the MVP, later
 ```typescript
 // ── Construction ────────────────────────────────────────────────────────────
 export interface GatewayConfig {
-  authorizedGroups: string[];          // ≥1 group JID (…@g.us)
+  authorizedGroups?: string[];         // optional (default []); group JIDs (…@g.us) to act in.
+                                       // auth-only/discovery (connect/force-reauth/list-groups) need none;
+                                       // group ops (receive/send/polls) require ≥1. Entries must be group JIDs.
 
   // Storage-agnostic credentials: the library persists NOTHING itself.
   credentials?: WhatsAppCredentials;   // opaque snapshot to resume from; omit ⇒ fresh QR pairing

@@ -139,8 +139,14 @@ export interface Logger {
 
 /** Input the consumer provides when constructing the Gateway. */
 export interface GatewayConfig {
-  /** ≥1 group JID (`…@g.us`). Activity outside these is ignored (FR-017). */
-  authorizedGroups: string[];
+  /**
+   * Group JIDs (`…@g.us`) this gateway may act in; inbound activity outside them is
+   * ignored (FR-017). **Optional** — omit (or pass `[]`) for auth-only / group-discovery
+   * use (`connect`, `force-reauth`, `list-groups`), which need no group. Any entry supplied
+   * must be a group JID (FR-018). Group-dependent operations (inbound dispatch, send, polls)
+   * require ≥1 entry and fail clearly when none is configured.
+   */
+  authorizedGroups?: string[];
 
   // Storage-agnostic credentials: the library persists NOTHING itself (FR-008).
   /** Opaque snapshot to resume from; omit ⇒ fresh QR pairing (FR-006). */

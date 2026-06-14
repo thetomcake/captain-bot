@@ -13,7 +13,7 @@ Input the consumer provides when constructing the Gateway.
 
 | Field | Type | Rules |
 |-------|------|-------|
-| `authorizedGroups` | `string[]` | ≥1 group JID (`…@g.us`). Activity outside these is ignored (FR-017). |
+| `authorizedGroups?` | `string[]` | Optional (default `[]`). Group JIDs (`…@g.us`) the gateway may act in; inbound activity outside them is ignored (FR-017). Auth-only / discovery use (`connect`, `force-reauth`, `list-groups`) needs none; group-dependent ops (inbound dispatch, send, polls) require ≥1. Any entry supplied must be a group JID (FR-018). |
 | `credentials` | `WhatsAppCredentials \| undefined` | Opaque snapshot to resume from; omit ⇒ fresh QR pairing (FR-006, FR-008). |
 | `onCredentialsUpdate` | `(creds: WhatsAppCredentials) => void \| Promise<void>` | Called when credentials change so the consumer can persist them; library stores nothing itself (FR-008, FR-012). |
 | `resolvePollKeyset` | `(ref: PollRef) => PollKeyset \| null \| Promise<PollKeyset \| null>` | Called when a vote arrives so the consumer can supply that poll's keyset; `null` ⇒ skip decryption, no error (FR-021). |
@@ -187,7 +187,7 @@ Aggregation applies last-write-per-voter and identity canonicalization so LID/PN
 
 ## Validation rules summary
 
-- `authorizedGroups`: non-empty; every entry must be a group JID (`isJidGroup`) (FR-017/FR-018).
+- `authorizedGroups`: optional (default `[]`); every entry supplied must be a group JID (`isJidGroup`) (FR-018). Group-dependent operations (inbound dispatch, send, polls) require ≥1 and fail clearly when none is configured (FR-017).
 - Poll: 2–12 non-empty options, posted as single-choice (multi-select out of scope) (FR-020). `sendPoll` returns a `PollKeyset` (FR-021).
 - Poll vote: obtain the poll's `messageSecret`+options from the in-session message store if the poll-creation message is still cached, else from `resolvePollKeyset`; if neither yields it, skip (no error). Each `PollVote` is a full per-voter selection; the consumer aggregates (FR-021/FR-022/FR-023).
 - Send/poll/delete before `connected`: reject with a clear error (Edge Cases).
