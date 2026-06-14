@@ -11,7 +11,7 @@ describe('requireConnected (Edge Cases: operations before connection must fail c
     'throws a clear error when status is %s',
     (status) => {
       expect(() => requireConnected(status)).toThrow(/connect/i);
-    },
+    }
   );
 
   it('includes the actual status in the error message', () => {

@@ -114,7 +114,7 @@ Canonical representation of a person, reconciling JID/LID/device forms (FR-025/F
 | `sender` | `Identity` | Canonical sender. |
 | `text` | `string \| null` | From `conversation` or `extendedTextMessage.text`. |
 | `timestamp` | `Date` | Normalized from `messageTimestamp`. |
-| `fromMe` | `boolean` | Echo guard; `onMessage` only fires for genuine `notify` inbound (FR-015). |
+| `fromMe` | `boolean` | Who sent it. `onMessage` fires for every live (`notify`) message, gated on `type`, **not** on `fromMe`; so this is `true` for the operator's own manual messages (the linked account is a participant). The Gateway's own programmatic sends + history backfill arrive as `append` and are never dispatched (FR-015). Consumers needing to treat own messages differently branch on this flag. |
 
 ### `MessageRef`
 Returned by `sendMessage`/`sendPoll` (FR-013/FR-020): `{ id: string; groupId: string }`. Sufficient to later `deleteMessage`.

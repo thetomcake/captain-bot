@@ -51,7 +51,8 @@ export interface IncomingMessage {
   sender: Identity;
   text: string | null;
   timestamp: Date;
-  /** Echo guard; `onMessage` only fires for genuine `notify` inbound (FR-015). */
+  /** Who sent it; `true` for the operator's own messages. The linked account is a participant,
+   *  so own messages ARE dispatched (FR-015). Branch on this to treat them differently. */
   fromMe: boolean;
 }
 

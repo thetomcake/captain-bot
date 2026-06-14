@@ -11,7 +11,7 @@ import type { ConnectionStatus } from '../types.js';
 export function requireConnected(status: ConnectionStatus): void {
   if (status !== 'connected') {
     throw new Error(
-      `WhatsApp Gateway is not connected (status: "${status}"). Call connect() and await a 'connected' status before performing this operation.`,
+      `WhatsApp Gateway is not connected (status: "${status}"). Call connect() and await a 'connected' status before performing this operation.`
     );
   }
 }

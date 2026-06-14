@@ -35,7 +35,7 @@ npx vitest run tests/unit/whatsapp-gateway
 | `disconnect-classifier` | Each status code → `restart`/`recover`/`terminal`; `408` ambiguity → `recover`; `401/403/411/500` → `terminal`; `515` → `restart` | FR-011, FR-010 |
 | `reconnect-policy` | Backoff is bounded, jittered, capped; restart-handshake cap honoured | FR-010, FR-011 |
 | `identity-resolver` | LID and PN forms of one person → one `canonicalId`; device suffix stripped; no double-identity | FR-025, FR-026 |
-| `message-mapper` | `notify` → `IncomingMessage`; `append`/echo not reported as inbound; text from `conversation`/`extendedTextMessage` | FR-014, FR-015 |
+| `message-mapper` | `notify` → `IncomingMessage` (incl. the operator's own manual messages — they are a participant); `append` (own programmatic-send echo / history) not reported; text from `conversation`/`extendedTextMessage` | FR-014, FR-015 |
 | `group-filter` | Only authorized group(s) pass; non-group / other chats rejected | FR-017, FR-018 |
 | `poll-options` | Rejects <2 or >12 options and empty options; accepts valid specs | FR-020 |
 | `poll-tally` | Pure `aggregateVotes(PollVote[])`: last-write-per-voter, withdrawal removes the voter, per-option voters canonicalized with no LID/PN double-count | FR-022, FR-023, FR-026 |
@@ -75,7 +75,7 @@ WA_GROUP_ID=<jid> WA_CREDS_FILE=./.wa-creds.json npx tsx src/whatsapp-gateway/bi
 # terminal 2:
 WA_GROUP_ID=<jid> WA_TEXT="hello from gateway" WA_CREDS_FILE=./.wa-creds.json npx tsx src/whatsapp-gateway/bin/send-message.ts
 ```
-**Expect**: sent text appears in the group and a `MessageRef` prints. In terminal 1, a message you send **from your phone in that group** is reported (sender + text); a message in **another chat is NOT reported**; the bot's own send is not reported as new inbound. **Pass**: FR-013, FR-014, FR-015, FR-016, FR-017 / SC-004.
+**Expect**: sent text appears in the group and a `MessageRef` prints. In terminal 1, a message you type **manually from your phone in that group is reported** (sender + text) — you are a participant on the linked account; a message in **another chat is NOT reported**. (The text from terminal 2 is also reported, as a live `notify` on the same account — expected under the participant model.) To confirm the gateway does not re-ingest its **own programmatic** output, run with `WA_DEBUG=1` and check such echoes are classified `append` (`skipping non-live item type=append`), not re-dispatched. **Pass**: FR-013, FR-014, FR-015, FR-016, FR-017 / SC-004.
 
 ### Scenario E — Poll & votes (US3) — the critical path
 ```bash

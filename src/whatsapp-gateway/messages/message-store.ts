@@ -16,7 +16,10 @@ import type { WAMessage, proto } from '@whiskeysockets/baileys';
 const DEFAULT_MAX_SIZE = 1000;
 
 /** Compose the store key from a remote JID and message id. */
-export function messageStoreKey(remoteJid: string | null | undefined, id: string | null | undefined): string {
+export function messageStoreKey(
+  remoteJid: string | null | undefined,
+  id: string | null | undefined
+): string {
   return `${remoteJid ?? ''}:${id ?? ''}`;
 }
 

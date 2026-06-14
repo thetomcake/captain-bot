@@ -10,13 +10,19 @@
 // getCredentials, socket creation wired to the message-store's getMessage, and the
 // reducer-driven transitions. Messaging, polls, groups and delete come in later phases.
 import makeWASocket, { Browsers } from '@whiskeysockets/baileys';
-import type { ConnectionState, WASocket } from '@whiskeysockets/baileys';
+import type {
+  ConnectionState,
+  MessageUpsertType,
+  WAMessage,
+  WASocket,
+} from '@whiskeysockets/baileys';
 import type {
   ConnectionStatus,
   GatewayConfig,
   GroupSummary,
   IncomingMessage,
   Logger,
+  MessageRef,
   PollVote,
   WhatsAppCredentials,
 } from './types.js';
@@ -24,6 +30,10 @@ import { resolveConfig, type ResolvedGatewayConfig } from './config.js';
 import { requireConnected } from './connection/require-connected.js';
 import { createAuthStore, type AuthStore } from './auth/auth-state.js';
 import { MessageStore, messageStoreKey } from './messages/message-store.js';
+import { GroupFilter } from './groups/group-filter.js';
+import { IdentityResolver } from './identity/identity-resolver.js';
+import { RateLimiter } from './rate-limiter.js';
+import { isNewInbound, mapIncomingMessage } from './messages/message-mapper.js';
 import {
   reduceConnection,
   initialConnectionState,
@@ -64,6 +74,12 @@ export class WhatsAppGateway {
   private readonly messageStore = new MessageStore();
   private readonly baileysLogger: BaileysLogger;
 
+  // US2 collaborators (pure units): authorized-group gate, canonical-identity resolver
+  // (one per session so learned LID↔PN pairings accumulate), and the send rate limiter.
+  private readonly groupFilter: GroupFilter;
+  private readonly identityResolver = new IdentityResolver();
+  private readonly sendLimiter: RateLimiter;
+
   private sock: WASocket | undefined;
   private reducerState: ConnectionReducerState = initialConnectionState();
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,6 +97,8 @@ export class WhatsAppGateway {
     // resolveConfig validates consumer input (throws on a bad authorizedGroups) + applies defaults.
     this.config = resolveConfig(config);
     this.baileysLogger = this.createBaileysLogger(this.config.logger);
+    this.groupFilter = new GroupFilter(this.config.authorizedGroups);
+    this.sendLimiter = new RateLimiter({ minDelay: this.config.minMessageDelayMs });
     // One-per-session auth store (C-2). Resumes from config.credentials if provided.
     this.authStore = createAuthStore({
       credentials: this.config.credentials,
@@ -189,6 +207,32 @@ export class WhatsAppGateway {
     }));
   }
 
+  // ── Messaging (US2) ─────────────────────────────────────────────────────────────---
+  /**
+   * Send a plain text message to a group (FR-013). Rate-limited (≤5 msg/min, FR-016) and
+   * guarded — rejects with a clear error unless `status() === 'connected'`. The sent message
+   * is cached in the in-memory store so Baileys can re-deliver it on a retry-receipt (§2).
+   * Returns a {@link MessageRef} sufficient to later `deleteMessage`.
+   *
+   * Verified against research.md §send: `sock.sendMessage(jid, { text })` →
+   * `Promise<WAMessage | undefined>` (the `undefined` is handled).
+   */
+  async sendMessage(groupId: string, text: string): Promise<MessageRef> {
+    requireConnected(this.reducerState.status);
+    // requireConnected guarantees 'connected', which only holds with a live socket.
+    if (!this.sock) {
+      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
+    }
+    const sock = this.sock;
+    const sent = await this.sendLimiter.execute(() => sock.sendMessage(groupId, { text }));
+    if (!sent?.key?.id) {
+      throw new Error('WhatsAppGateway: sendMessage returned no usable message reference');
+    }
+    // Cache the outbound message for getMessage send-retries (§2).
+    this.messageStore.set(sent);
+    return { id: sent.key.id, groupId };
+  }
+
   // ── Subscriptions ───────────────────────────────────────────────────────────────---
   onQR(handler: QRHandler): void {
     this.qrHandlers.push(handler);
@@ -230,6 +274,7 @@ export class WhatsAppGateway {
     sock.ev.on('connection.update', (update) => this.handleConnectionUpdate(update));
     // creds.update funnels through the auth store's single emit path (C-1).
     sock.ev.on('creds.update', () => this.authStore.emitUpdate());
+    sock.ev.on('messages.upsert', (upsert) => this.handleMessagesUpsert(upsert));
   }
 
   private handleConnectionUpdate(update: Partial<ConnectionState>): void {
@@ -246,6 +291,82 @@ export class WhatsAppGateway {
     } else if (connection === 'close') {
       const statusCode = extractStatusCode(lastDisconnect?.error);
       this.applyEvent({ type: 'close', statusCode }, lastDisconnect?.error, statusCode);
+    }
+  }
+
+  /**
+   * Handle a `messages.upsert` batch (US2, FR-014/FR-015/FR-017). Per the official Baileys
+   * docs the payload is `{ type: 'notify' | 'append', messages: WAMessage[] }` and the array
+   * must be iterated in full. Every message (any type) is cached so `getMessage` can serve
+   * send-retries and the later poll-secret fast-path (§2/§7); only live `'notify'` events
+   * from an authorized group are mapped and dispatched (including the operator's own manual
+   * messages — the linked account is a participant; `'append'` history/echo is excluded).
+   */
+  private handleMessagesUpsert(upsert: { messages: WAMessage[]; type: MessageUpsertType }): void {
+    const { messages, type } = upsert;
+    this.config.logger.debug('WhatsAppGateway: messages.upsert received', {
+      type,
+      count: messages.length,
+    });
+    for (const msg of messages) {
+      // Cache first, unconditionally — append/echo/other-chat messages still back getMessage.
+      this.messageStore.set(msg);
+
+      const remoteJid = msg.key?.remoteJid ?? undefined;
+      const fromMe = msg.key?.fromMe === true;
+      const newInbound = isNewInbound(type, msg);
+      const authorized = this.groupFilter.isAuthorized(remoteJid);
+      this.config.logger.debug('WhatsAppGateway: upsert item', {
+        id: msg.key?.id,
+        remoteJid,
+        participant: msg.key?.participant ?? undefined,
+        fromMe,
+        type,
+        newInbound,
+        authorized,
+      });
+
+      if (!newInbound) {
+        this.config.logger.debug('WhatsAppGateway: skipping non-live item', {
+          reason: `type=${type} (only 'notify' is live; 'append' = history / own programmatic-send echo)`,
+        });
+        continue;
+      }
+      if (!authorized) {
+        // cross-chat leakage prevention (FR-017): ignore DMs/other groups/broadcast. The most
+        // common cause of "listen prints nothing" is a configured authorizedGroups JID that
+        // does not exactly match this remoteJid — both are logged above to spot the mismatch.
+        this.config.logger.debug('WhatsAppGateway: dropping message from unauthorized chat', {
+          remoteJid,
+          authorizedGroups: this.config.authorizedGroups,
+        });
+        continue;
+      }
+
+      const incoming = mapIncomingMessage(msg, this.identityResolver);
+      this.config.logger.debug('WhatsAppGateway: dispatching inbound message', {
+        groupId: incoming.groupId,
+        sender: incoming.sender.canonicalId,
+        hasText: incoming.text !== null,
+        handlers: this.messageHandlers.length,
+      });
+      this.dispatchMessage(incoming);
+    }
+  }
+
+  /** Fan an inbound message out to subscribers; a handler that throws/rejects can't break us. */
+  private dispatchMessage(message: IncomingMessage): void {
+    for (const handler of this.messageHandlers) {
+      try {
+        const result = handler(message);
+        if (result instanceof Promise) {
+          result.catch((err) =>
+            this.config.logger.error('WhatsAppGateway: onMessage handler rejected', err)
+          );
+        }
+      } catch (err) {
+        this.config.logger.error('WhatsAppGateway: onMessage handler threw', err);
+      }
     }
   }
 
@@ -333,6 +454,7 @@ export class WhatsAppGateway {
     try {
       sock.ev.removeAllListeners('connection.update');
       sock.ev.removeAllListeners('creds.update');
+      sock.ev.removeAllListeners('messages.upsert');
     } catch (err) {
       this.config.logger.debug('WhatsAppGateway: error removing socket listeners', err);
     }

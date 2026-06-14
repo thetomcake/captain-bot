@@ -116,7 +116,7 @@ export interface Logger { debug(...a: unknown[]): void; info(...a: unknown[]): v
 | `onPollVote` | Fires once per successfully decrypted vote with the voter's canonical `Identity` and full current selection (FR-022); a change/withdrawal is the voter's new full selection / `[]` (FR-023); correct in LID groups (FR-024); no LID/PN double-identity (FR-026). The consumer aggregates (optionally via `aggregateVotes`). |
 | `deleteMessage` | Best-effort revoke; **never throws** on WhatsApp rejection — returns `{ ok: false, reason }` (FR-028). |
 | `listGroups` | All participating groups with name + id; empty array if none (FR-019). |
-| `onMessage` | Fires **only** for genuine inbound (`notify`) from an authorized group; never for echoes/append or other chats (FR-014/FR-015/FR-017). |
+| `onMessage` | Fires for every live (`notify`) message from an authorized group — **including the operator's own manual messages** (the linked account is a participant; `fromMe` may be `true`). Never fires for `append` events (the Gateway's own programmatic-send echoes + history backfill) or other chats (FR-014/FR-015/FR-017). Consumers that must treat the operator's own messages differently branch on `IncomingMessage.fromMe`. |
 
 ## Invariants
 - No Baileys type appears in any exported signature; `WhatsAppCredentials` is opaque.

@@ -58,7 +58,7 @@ A consumer needs to send text messages to the authorized group and to be notifie
 1. **Given** a connected session, **When** the consumer sends text to the authorized group, **Then** the message appears in that group and the Gateway returns a reference (message identifier) for it.
 2. **Given** a connected session, **When** a new message arrives in the authorized group, **Then** the Gateway notifies the consumer with the message text, sender identity, timestamp, and message identifier.
 3. **Given** a connected session, **When** a message arrives in any chat other than the authorized group, **Then** the Gateway does not notify the consumer.
-4. **Given** an incoming message that the Gateway's own activity echoes back (rather than a genuinely new inbound message), **When** it is observed, **Then** the Gateway does not misreport it as new inbound user activity.
+4. **Given** an incoming message that the Gateway's own **programmatic** activity echoes back, or history replayed on resync (rather than a genuinely new live message), **When** it is observed, **Then** the Gateway does not misreport it as new inbound user activity. (A message the operator sends manually from their own phone IS genuine new inbound activity and is reported — the operator is a participant.)
 5. **Given** outbound sends in quick succession, **When** the consumer sends multiple messages, **Then** the Gateway paces them within a conservative rate limit to reduce ban risk.
 
 ---
@@ -154,7 +154,7 @@ A consumer needs to remove a message or poll the Gateway previously posted to th
 
 - **FR-013**: The Gateway MUST send text messages to a configured group and return a reference (message identifier) for each sent message.
 - **FR-014**: The Gateway MUST notify the consumer of incoming messages, providing message text, sender identity, timestamp, and message identifier.
-- **FR-015**: The Gateway MUST distinguish genuinely new inbound messages from echoes of its own activity / history backfill, and MUST only report the former as new inbound activity.
+- **FR-015**: The Gateway MUST distinguish genuinely new inbound messages from echoes of its own activity / history backfill, and MUST only report the former as new inbound activity. **Clarification:** the Gateway is linked to the operator's own account, so the operator is a **participant** — messages they send manually (e.g. from their own phone) ARE genuine new inbound activity and MUST be reported, even though they carry the account's own identity. "Echoes of its own activity" means the Gateway's **programmatic** sends (`sendMessage`/`sendPoll`) and resync history backfill — both of which the protocol delivers as `append`-type events — and these MUST NOT be reported. Dispatch is therefore gated on the live/history nature of the event, not on whether it is from the linked account.
 - **FR-016**: The Gateway MUST pace outbound sends within a conservative, configurable rate limit to reduce account-ban risk.
 
 #### Group restriction
