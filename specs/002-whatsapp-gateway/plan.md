@@ -19,7 +19,7 @@ The decisive technical approach: keep all hard logic in **pure, injectable units
 - `qrcode-terminal` + `qrcode` (already in the project) — QR rendering inside the manual entry points only, not in the library core.
 - No other runtime dependencies introduced. The library reuses the existing `RateLimiter` pattern (`p-queue`-backed) but as its own copy/util to stay decoupled from MVP code.
 
-**Storage**: **None owned by the library — fully storage-agnostic.** The Gateway holds auth state in memory only and never touches the filesystem or a database. The consumer optionally passes an **opaque, serialized credential snapshot** (`WhatsAppCredentials`) into the constructor; whenever credentials change the library invokes a consumer-supplied `onCredentialsUpdate(snapshot)` callback (and exposes `getCredentials()`), so the consumer persists the snapshot however it likes (DB, file, secret store) and passes it back next time. The snapshot is opaque (library serializes Baileys `creds`+`keys` via `BufferJSON` internally). **Polls follow the same pattern**: `sendPoll` returns a `PollKeyset` (the per-poll `messageSecret` + options) the consumer persists; to decrypt a later vote the library asks for it via the `resolvePollKeyset` callback (no keyset ⇒ skip, no error). The library keeps no durable poll state and **no durable tally** — it emits per-voter `PollVote` events and the consumer aggregates. An in-memory message cache may exist only for Baileys send-retries. This gives **zero infrastructure coupling**, satisfying FR-002 (no MVP dependency) and FR-008 (standalone).
+**Storage**: **None owned by the library — fully storage-agnostic.** The Gateway holds auth state in memory only and never touches the filesystem or a database. The consumer optionally passes an **opaque, serialized credential snapshot** (`WhatsAppCredentials`) into the constructor; whenever credentials change the library invokes a consumer-supplied `onCredentialsUpdate(snapshot)` callback (and exposes `getCredentials()`), so the consumer persists the snapshot however it likes (DB, file, secret store) and passes it back next time. The snapshot is opaque (library serializes Baileys `creds`+`keys` via `BufferJSON` internally). **Polls follow the same pattern**: `sendPoll` returns a `PollKeyset` (the per-poll `messageSecret` + options) the consumer persists; to decrypt a later vote the library asks for it via the `resolvePollKeyset` callback (no keyset ⇒ skip, no error). The library keeps no durable poll state and **no durable tally** — it emits per-voter `PollVote` events and the consumer aggregates. The library keeps a **bounded, in-memory** message store (recently sent + received messages, LRU-capped) that backs Baileys' `getMessage` for send-retries (so our messages/polls are re-delivered when a recipient requests a retry-receipt) and serves as the **first-choice source of a poll's `messageSecret` + options** when the poll-creation message is still cached this session; the consumer's `resolvePollKeyset` keyset is the **durable fallback** and the only path that survives a restart. The store is ephemeral — never persisted, no MVP coupling. This gives **zero infrastructure coupling**, satisfying FR-002 (no MVP dependency) and FR-008 (standalone).
 
 **Testing**: Vitest. Unit tests target the **pure units at the library's own interface boundary** — never `vi.mock('@whiskeysockets/baileys')` (consistent with `tests/README.md` and the MVP's existing rule). Socket-bound orchestration (QR pairing, live connection, live votes) is **interactive hardware**, excluded from the automated suite per constitution and validated through the manual entry points. Target: full new unit suite runs in well under the project's existing fast-suite budget.
 
@@ -80,23 +80,25 @@ src/whatsapp-gateway/                # NEW, self-contained; does not touch src/w
 ├── index.ts                         # Public surface: WhatsAppGateway + domain types
 ├── gateway.ts                       # Baileys-bound orchestration shell (manual-validated)
 ├── types.ts                         # Public domain types (no Baileys types leak out)
-├── config.ts                        # GatewayConfig (authorized groups, rate, store)
+├── config.ts                        # GatewayConfig (authorized groups, rate, callbacks) + validation
+├── rate-limiter.ts                  # Decoupled p-queue limiter (≤5 msg/min); own copy, not MVP's
 ├── connection/
 │   ├── disconnect-classifier.ts     # PURE: status code → recover | terminal | restart
-│   └── reconnect-policy.ts          # PURE: bounded backoff schedule + restart-handshake cap
+│   ├── reconnect-policy.ts          # PURE: bounded backoff schedule + restart-handshake cap
+│   └── require-connected.ts         # PURE: throw a clear error unless status === 'connected'
 ├── auth/
 │   ├── credentials.ts               # PURE: (de)serialize creds+keys ↔ opaque WhatsAppCredentials snapshot
 │   └── auth-state.ts                # Build in-memory AuthenticationState from a snapshot; emit onCredentialsUpdate
 ├── messages/
 │   ├── message-mapper.ts            # PURE: WAMessage → Message; notify vs append handling
-│   └── message-store.ts             # Best-effort in-memory cache for send-retries (getMessage); NOT on the vote path
+│   └── message-store.ts             # Bounded in-memory LRU: getMessage send-retries + poll-secret fast-path; NOT durable
 ├── groups/
 │   └── group-filter.ts              # PURE: authorized-group restriction + isJidGroup guard
 ├── identity/
 │   └── identity-resolver.ts         # PURE: JID/LID (+device) → canonical identity
 ├── polls/
-│   ├── poll-options.ts              # PURE: validate 2–12 options, selectableCount
-│   ├── poll-vote-decryptor.ts       # Decrypt a vote from a consumer-supplied PollKeyset; #2342 try-both LID/PN fallback
+│   ├── poll-options.ts              # PURE: validate 2–12 options (single-choice; multi-select out of scope)
+│   ├── poll-vote-decryptor.ts       # Decrypt a vote given secret+options (from store or keyset); #2342 try-both; PURE hash→name mapping
 │   └── poll-tally.ts                # PURE: aggregateVotes(PollVote[]) → PollResult (optional consumer helper)
 └── bin/                             # One entry point per action — NO shared arg parser
     ├── connect.ts
@@ -109,17 +111,20 @@ src/whatsapp-gateway/                # NEW, self-contained; does not touch src/w
     └── delete-message.ts
 
 tests/unit/whatsapp-gateway/         # NEW; pure-unit tests, no live socket, no Baileys mock
+├── config.test.ts                  # authorizedGroups validation: non-empty + isJidGroup
+├── require-connected.test.ts       # guard throws unless connected
 ├── disconnect-classifier.test.ts
 ├── reconnect-policy.test.ts
 ├── identity-resolver.test.ts
 ├── message-mapper.test.ts
 ├── group-filter.test.ts
 ├── poll-options.test.ts
+├── poll-vote-decryptor.test.ts     # deterministic option-hash → name mapping
 ├── poll-tally.test.ts
 └── credentials.test.ts             # snapshot serialize → deserialize round-trip (pure)
 ```
 
-**Structure Decision**: New isolated subtree `src/whatsapp-gateway/` so the library is fully decoupled from the MVP (`src/whatsapp/`, services, `database/schema.ts`) — satisfying FR-002. The Baileys-touching surface is confined to `gateway.ts`, `auth/auth-state.ts`, and `polls/poll-vote-decryptor.ts`; everything else (including credential snapshot serialization) is pure and unit-tested. The library owns no storage — credentials are returned to the consumer to persist. Entry points in `bin/` are thin, single-action, and import only the library's public surface (`index.ts`), proving SC-001.
+**Structure Decision**: New isolated subtree `src/whatsapp-gateway/` so the library is fully decoupled from the MVP (`src/whatsapp/`, services, `database/schema.ts`) — satisfying FR-002. The Baileys-touching surface is confined to `gateway.ts`, `auth/auth-state.ts`, and `polls/poll-vote-decryptor.ts`; everything else (including credential snapshot serialization) is pure and unit-tested. The library owns no *durable* storage — credentials and poll keysets are returned to the consumer to persist; its only in-process state is the ephemeral, bounded message store (send-retries + poll-secret fast-path), which holds Baileys message objects internally but exposes none. Entry points in `bin/` are thin, single-action, and import only the library's public surface (`index.ts`), proving SC-001.
 
 ## Complexity Tracking
 

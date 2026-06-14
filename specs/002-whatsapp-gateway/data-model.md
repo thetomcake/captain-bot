@@ -119,8 +119,12 @@ Canonical representation of a person, reconciling JID/LID/device forms (FR-025/F
 ### `MessageRef`
 Returned by `sendMessage`/`sendPoll` (FR-013/FR-020): `{ id: string; groupId: string }`. Sufficient to later `deleteMessage`.
 
-### `MessageStore` (internal)
-Retains every upserted message (any `type`) keyed by `${remoteJid}:${id}`, plus the poll-creation message stored at send time. Backs `getMessage` and poll-vote `messageSecret` recovery (research.md §5–§7). In-memory by default; optional persistence hook.
+### `MessageStore` (internal, ephemeral)
+A **bounded, in-memory** LRU cache of recently sent and received messages, keyed by `${remoteJid}:${id}`. Two jobs:
+- Backs Baileys' `getMessage(key)` so our outbound messages/polls can be **re-sent on a retry-receipt** (research.md §2). A miss returns `undefined` (best-effort; empty after a restart).
+- Serves as the **first-choice source of a poll's `messageSecret` + option names** when the poll-creation message is still cached this session — the Gateway reads `messageContextInfo.messageSecret` + `pollCreationMessage.options` directly, skipping the consumer round-trip. The consumer's `resolvePollKeyset` keyset is the **durable fallback** and the only path that survives a restart (research.md §7).
+
+Never persisted; holds Baileys message objects internally but exposes none. It is **not** the consumer's durable store (FR-008) — durability remains the credential snapshot + poll keysets.
 
 ---
 
@@ -130,8 +134,7 @@ Retains every upserted message (any `type`) keyed by `${remoteJid}:${id}`, plus 
 | Field | Type | Rules |
 |-------|------|-------|
 | `question` | `string` | Non-empty. |
-| `options` | `string[]` | **2–12** entries, each non-empty, validated by `poll-options.ts` before send (FR-020). |
-| `selectableCount` | `number` | `1` = single-choice (default); `>1`/`0` = multi. |
+| `options` | `string[]` | **2–12** entries, each non-empty, validated by `poll-options.ts` before send (FR-020). Posted as a single-choice poll; multi-select is out of scope for now. |
 
 ### `PollKeyset` (returned by `sendPoll`; supplied back via `resolvePollKeyset`)
 | Field | Type | Notes |
@@ -140,7 +143,6 @@ Retains every upserted message (any `type`) keyed by `${remoteJid}:${id}`, plus 
 | `groupId` | `string` | Group the poll was posted to. |
 | `messageSecret` | `string` | Base64-encoded 32-byte secret used to decrypt this poll's votes. Persist verbatim. |
 | `options` | `string[]` | Option texts — needed to label decrypted selections (vote payloads carry option *hashes*, not names). |
-| `selectableCount` | `number` | As posted. |
 
 The consumer stores the keyset (e.g. the MVP adds a `messageSecret` column alongside its existing poll/option rows) and returns it from `resolvePollKeyset` when a vote for that poll arrives. The Gateway persists none of it (FR-021).
 
@@ -175,7 +177,7 @@ Aggregation applies last-write-per-voter and identity canonicalization so LID/PN
 | Event | Payload | Requirement |
 |-------|---------|-------------|
 | `onCredentialsUpdate(creds)` | opaque snapshot to persist (config callback, push) | FR-006/FR-008/FR-012 |
-| `resolvePollKeyset(ref) → keyset \| null` | consumer supplies a poll's decryption keyset on demand (config callback, pull) | FR-021 |
+| `resolvePollKeyset(ref) → keyset \| null` | consumer supplies a poll's decryption keyset on demand — **fallback** when the poll-creation message isn't in the in-session store (config callback, pull) | FR-021 |
 | `onQR(qr: string)` | raw QR string to render | FR-005 |
 | `onConnectionChange(status: ConnectionStatus)` | lifecycle | FR-009 |
 | `onMessage(msg: IncomingMessage)` | genuine inbound in an authorized group | FR-014/FR-015/FR-017 |
@@ -186,8 +188,8 @@ Aggregation applies last-write-per-voter and identity canonicalization so LID/PN
 ## Validation rules summary
 
 - `authorizedGroups`: non-empty; every entry must be a group JID (`isJidGroup`) (FR-017/FR-018).
-- Poll: 2–12 non-empty options; `selectableCount ≥ 0` (FR-020). `sendPoll` returns a `PollKeyset` (FR-021).
-- Poll vote: decrypt only if `resolvePollKeyset` returns a keyset; otherwise skip (no error). Each `PollVote` is a full per-voter selection; the consumer aggregates (FR-021/FR-022/FR-023).
+- Poll: 2–12 non-empty options, posted as single-choice (multi-select out of scope) (FR-020). `sendPoll` returns a `PollKeyset` (FR-021).
+- Poll vote: obtain the poll's `messageSecret`+options from the in-session message store if the poll-creation message is still cached, else from `resolvePollKeyset`; if neither yields it, skip (no error). Each `PollVote` is a full per-voter selection; the consumer aggregates (FR-021/FR-022/FR-023).
 - Send/poll/delete before `connected`: reject with a clear error (Edge Cases).
 - Delete: best-effort; rejection reported, never thrown to crash (FR-028).
 - Identity: always reduce to `canonicalId` before counting/reporting (FR-025/FR-026).

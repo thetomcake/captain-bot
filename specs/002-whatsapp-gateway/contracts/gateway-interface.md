@@ -14,7 +14,8 @@ export interface GatewayConfig {
 
   // Storage-agnostic poll decryption: consumer supplies a poll's keyset on demand.
   resolvePollKeyset?: (ref: PollRef) => PollKeyset | null | Promise<PollKeyset | null>;
-                                       // return null ⇒ skip decryption for that vote (no error)
+                                       // fallback used only when the poll-creation message isn't in the
+                                       // in-session store; return null ⇒ skip decryption for that vote (no error)
 
   minMessageDelayMs?: number;          // default 12000 (≤5 msg/min)
   maxRestartHandshakes?: number;       // default 5
@@ -73,12 +74,11 @@ export interface IncomingMessage {
 }
 
 // Polls
-export interface PollSpec { question: string; options: string[]; selectableCount?: number; }
+export interface PollSpec { question: string; options: string[]; }  // single-choice; multi-select out of scope
 export interface PollKeyset {            // returned by sendPoll; supplied back via resolvePollKeyset
   pollId: string; groupId: string;
   messageSecret: string;                 // base64 32-byte secret; persist verbatim
   options: string[];                     // option texts (to label decrypted selections)
-  selectableCount: number;
 }
 export interface PollRef { pollId: string; groupId: string; }
 export interface PollSendResult { ref: MessageRef; keyset: PollKeyset; }
@@ -110,7 +110,7 @@ export interface Logger { debug(...a: unknown[]): void; info(...a: unknown[]): v
 | `forceReauth()` | Best-effort logout, clears in-memory credentials; consumer discards its stored snapshot so the next `connect()` requires a fresh QR (FR-007). |
 | `sendMessage` | Rate-limited (FR-016); rejects if not connected; returns a `MessageRef`. |
 | `sendPoll` | Validates 2–12 options (FR-020); rejects if not connected; posts the poll **with a Gateway-generated `messageSecret`** and returns `{ ref, keyset }` — the consumer MUST store the `keyset` to decrypt later votes (FR-021). |
-| `resolvePollKeyset` (consumer-supplied) | On each incoming vote the Gateway calls it with a `PollRef`; a returned keyset is used to decrypt; `null` (or a throw) ⇒ that vote is **skipped without error** (FR-021). Resolved keysets are cached in-memory for the session. |
+| `resolvePollKeyset` (consumer-supplied) | On each incoming vote, **if the poll-creation message is not in the Gateway's in-session message store**, the Gateway calls this with a `PollRef`; a returned keyset is used to decrypt; `null`/throw ⇒ that vote is **skipped without error** (FR-021). When the poll *is* still cached this session, the Gateway reads the secret from there and may not call the resolver. The keyset is the durable, restart-proof source; resolved keysets are cached in-memory for the session. |
 | `onPollVote` | Fires once per successfully decrypted vote with the voter's canonical `Identity` and full current selection (FR-022); a change/withdrawal is the voter's new full selection / `[]` (FR-023); correct in LID groups (FR-024); no LID/PN double-identity (FR-026). The consumer aggregates (optionally via `aggregateVotes`). |
 | `deleteMessage` | Best-effort revoke; **never throws** on WhatsApp rejection — returns `{ ok: false, reason }` (FR-028). |
 | `listGroups` | All participating groups with name + id; empty array if none (FR-019). |
@@ -118,6 +118,6 @@ export interface Logger { debug(...a: unknown[]): void; info(...a: unknown[]): v
 
 ## Invariants
 - No Baileys type appears in any exported signature; `WhatsAppCredentials` is opaque.
-- The library performs **no filesystem or database I/O**; all durable state (credentials, poll keysets, vote tally) is the consumer's, via `credentials`/`onCredentialsUpdate`/`getCredentials()`, `sendPoll` result + `resolvePollKeyset`, and consumer-side aggregation.
+- The library performs **no filesystem or database I/O**; all durable state (credentials, poll keysets, vote tally) is the consumer's, via `credentials`/`onCredentialsUpdate`/`getCredentials()`, `sendPoll` result + `resolvePollKeyset`, and consumer-side aggregation. (A bounded, ephemeral in-memory message store backs send-retries and an in-session poll-secret fast-path, but it is never persisted and survives no restart.)
 - Every person in `IncomingMessage.sender` / `PollVote.voter` is a canonical `Identity` (FR-025).
 - Operations that require a live socket reject clearly when `status() !== 'connected'`.
