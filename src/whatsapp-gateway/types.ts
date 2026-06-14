@@ -1,0 +1,166 @@
+// Public domain types for the WhatsApp Gateway library.
+//
+// INVARIANT (contracts/gateway-interface.md): no Baileys type may appear in this
+// file or in index.ts. The gateway translates Baileys shapes into these at the
+// boundary (FR-003). All identifiers are strings; timestamps are JS `Date`.
+
+// ── Connection ────────────────────────────────────────────────────────────────
+
+/** Lifecycle status surfaced to the consumer (FR-009). */
+export type ConnectionStatus = 'connecting' | 'connected' | 'closed' | 'terminal';
+
+// ── Credentials (opaque snapshot, FR-008) ───────────────────────────────────────
+
+/**
+ * Opaque, JSON-serializable session snapshot. Treat as a black box: persist
+ * verbatim and pass back via {@link GatewayConfig.credentials}. The library
+ * (de)serializes Baileys `creds` + signal `keys` into/out of this internally.
+ */
+export type WhatsAppCredentials = string;
+
+// ── Groups ──────────────────────────────────────────────────────────────────--
+
+/** Returned by `listGroups()` (FR-019). */
+export interface GroupSummary {
+  id: string;
+  name: string;
+  /** Surfaced so the consumer knows if the group is LID-addressed (affects vote attribution). */
+  addressingMode?: 'pn' | 'lid';
+}
+
+// ── Identity ────────────────────────────────────────────────────────────────--
+
+/** Canonical representation of a person, reconciling JID/LID/device forms (FR-025/FR-026). */
+export interface Identity {
+  /** Stable key used everywhere (prefers PN form when known; device suffix stripped). */
+  canonicalId: string;
+  /** Phone-number-form JID, if known. */
+  pn?: string;
+  /** LID-form JID, if known. */
+  lid?: string;
+  /** Best-effort human label (e.g. push name), optional. */
+  displayHint?: string;
+}
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+
+/** Reported to `onMessage` for genuine inbound activity (FR-014). */
+export interface IncomingMessage {
+  id: string;
+  groupId: string;
+  sender: Identity;
+  text: string | null;
+  timestamp: Date;
+  /** Echo guard; `onMessage` only fires for genuine `notify` inbound (FR-015). */
+  fromMe: boolean;
+}
+
+/** Returned by `sendMessage`/`sendPoll` (FR-013/FR-020); sufficient to later `deleteMessage`. */
+export interface MessageRef {
+  id: string;
+  groupId: string;
+}
+
+export type DeleteOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'window-expired' | 'not-found' | 'network' | 'unknown'; detail?: string };
+
+// ── Polls ───────────────────────────────────────────────────────────────────--
+
+/** Input to `sendPoll`. Single-choice; multi-select is out of scope for now. */
+export interface PollSpec {
+  question: string;
+  /** 2–12 entries, each non-empty (validated by poll-options.ts before send, FR-020). */
+  options: string[];
+}
+
+/** Returned by `sendPoll`; supplied back via `resolvePollKeyset` (FR-021). */
+export interface PollKeyset {
+  pollId: string;
+  groupId: string;
+  /** Base64-encoded 32-byte secret used to decrypt this poll's votes. Persist verbatim. */
+  messageSecret: string;
+  /** Option texts — needed to label decrypted selections (vote payloads carry option hashes). */
+  options: string[];
+}
+
+/** Input to `resolvePollKeyset` — tells the consumer which poll's keyset to return. */
+export interface PollRef {
+  pollId: string;
+  groupId: string;
+}
+
+/** Returned by `sendPoll` (FR-020/FR-021). */
+export interface PollSendResult {
+  ref: MessageRef;
+  keyset: PollKeyset;
+}
+
+/** Emitted by `onPollVote` — one per-voter current selection, a delta (FR-022/FR-023). */
+export interface PollVote {
+  pollId: string;
+  groupId: string;
+  /** Canonical voter (LID/PN reconciled). */
+  voter: Identity;
+  /** The voter's full current selection (option names); `[]` = withdrawn. */
+  selectedOptions: string[];
+  timestamp: Date;
+}
+
+/** Consumer-side aggregation output (from `aggregateVotes`; library never maintains it). */
+export interface PollOptionResult {
+  name: string;
+  voters: Identity[];
+  voteCount: number;
+}
+
+export interface PollResult {
+  pollId: string;
+  options: PollOptionResult[];
+}
+
+// ── Configuration ───────────────────────────────────────────────────────────--
+
+export interface ReconnectPolicyConfig {
+  baseDelayMs: number;
+  maxDelayMs: number;
+  factor: number;
+  jitter: boolean;
+  /** `null` ⇒ retry recoverable closes indefinitely. */
+  maxAttempts: number | null;
+}
+
+export interface Logger {
+  debug(...a: unknown[]): void;
+  info(...a: unknown[]): void;
+  warn(...a: unknown[]): void;
+  error(...a: unknown[]): void;
+}
+
+/** Input the consumer provides when constructing the Gateway. */
+export interface GatewayConfig {
+  /** ≥1 group JID (`…@g.us`). Activity outside these is ignored (FR-017). */
+  authorizedGroups: string[];
+
+  // Storage-agnostic credentials: the library persists NOTHING itself (FR-008).
+  /** Opaque snapshot to resume from; omit ⇒ fresh QR pairing (FR-006). */
+  credentials?: WhatsAppCredentials;
+  /** Fired whenever credentials change so the consumer can persist them (FR-008/FR-012). */
+  onCredentialsUpdate?: (creds: WhatsAppCredentials) => void | Promise<void>;
+
+  // Storage-agnostic poll decryption: consumer supplies a poll's keyset on demand.
+  /**
+   * Fallback used only when the poll-creation message isn't in the in-session store;
+   * return `null` ⇒ skip decryption for that vote (no error) (FR-021).
+   */
+  resolvePollKeyset?: (ref: PollRef) => PollKeyset | null | Promise<PollKeyset | null>;
+
+  /** Default `12000` (≤5 msg/min, FR-016). */
+  minMessageDelayMs?: number;
+  /** Default `5` — bounds the post-pairing 515 handshake loop (FR-010). */
+  maxRestartHandshakes?: number;
+  /** Backoff schedule for recoverable closes (FR-011). */
+  reconnect?: Partial<ReconnectPolicyConfig>;
+  /** Optional; defaults to a no-op logger. */
+  logger?: Logger;
+}

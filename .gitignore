@@ -21,6 +21,12 @@ captain-stats.db*
 # WhatsApp auth state
 .whatsapp-auth/
 
+# WhatsApp Gateway consumer-side credential/keyset files (manual entry points;
+# the library itself persists nothing)
+.wa-creds.json
+*.wa-creds.json
+*.wa-poll-keys.json
+
 # Logs
 logs/
 *.log
