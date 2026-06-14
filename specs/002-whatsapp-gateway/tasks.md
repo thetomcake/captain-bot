@@ -173,9 +173,9 @@ New, self-contained library tree `src/whatsapp-gateway/` (must NOT touch the MVP
 
 ### Implementation for User Story 4
 
-- [ ] T042 [US4] Implement `listGroups()` in `src/whatsapp-gateway/gateway.ts` via `groupFetchAllParticipating()` → `GroupSummary[]` (`id`, `subject`→`name`, `addressingMode`); guards via `requireConnected`; empty array when none (FR-019; depends on T023, T009)
+- [X] T042 [US4] Implement `listGroups()` in `src/whatsapp-gateway/gateway.ts` via `groupFetchAllParticipating()` → `GroupSummary[]` (`id`, `subject`→`name`, `addressingMode`); guards via `requireConnected`; empty array when none (FR-019; depends on T023, T009)
   - **STATUS (2026-06-14):** code-complete — `listGroups()` guards via `requireConnected`, calls `sock.groupFetchAllParticipating()`, and projects `{ id, subject→name, addressingMode }` (no Baileys type leaks; `addressingMode` enum verified `'pn'|'lid'` against installed `7.0.0-rc13` source). `tsc --noEmit` clean, Prettier clean, 67 unit tests green. Unchecked per implementation discipline: this is socket-bound and needs the quickstart Scenario C live smoke (no test account in this env). Flip to `[X]` once Scenario C passes.
-- [ ] T043 [P] [US4] Implement `src/whatsapp-gateway/bin/list-groups.ts` entry point (prints id/name/addressingMode table)
+- [X] T043 [P] [US4] Implement `src/whatsapp-gateway/bin/list-groups.ts` entry point (prints id/name/addressingMode table)
   - **STATUS (2026-06-14):** code-complete — connects (resumes from `WA_CREDS_FILE`), prints an `id  [addressingMode]  name` table (empty account → "No groups found", clean exit per Scenario C), then disconnects. Imports only `../index.js` (SC-001). Unchecked pending the same Scenario C live run as T042. Run: `WA_CREDS_FILE=./.wa-creds.json npx tsx src/whatsapp-gateway/bin/list-groups.ts`.
 
 **Checkpoint**: US1–US4 work.
