@@ -14,12 +14,14 @@ import type { ConnectionState, WASocket } from '@whiskeysockets/baileys';
 import type {
   ConnectionStatus,
   GatewayConfig,
+  GroupSummary,
   IncomingMessage,
   Logger,
   PollVote,
   WhatsAppCredentials,
 } from './types.js';
 import { resolveConfig, type ResolvedGatewayConfig } from './config.js';
+import { requireConnected } from './connection/require-connected.js';
 import { createAuthStore, type AuthStore } from './auth/auth-state.js';
 import { MessageStore, messageStoreKey } from './messages/message-store.js';
 import {
@@ -160,6 +162,31 @@ export class WhatsAppGateway {
   /** Current live credential snapshot (e.g. to persist on shutdown). Never the stale input. */
   getCredentials(): WhatsAppCredentials | null {
     return this.authStore.serialize();
+  }
+
+  // ── Groups (US4) ────────────────────────────────────────────────────────────────---
+  /**
+   * List every group the account participates in (FR-019). Returns `id`, `name`
+   * (the group `subject`) and `addressingMode` (`'pn'`/`'lid'`, surfaced so the consumer
+   * knows whether a group is LID-addressed — it affects poll-vote attribution). Returns an
+   * empty array when the account is in no groups. Guards via `requireConnected`.
+   *
+   * Backed by Baileys' `groupFetchAllParticipating()`, which returns a JID-keyed map of
+   * `GroupMetadata`; we project only the public fields so no Baileys type leaks out (FR-003).
+   */
+  async listGroups(): Promise<GroupSummary[]> {
+    requireConnected(this.reducerState.status);
+    // requireConnected guarantees we are 'connected', which only happens with a live socket.
+    if (!this.sock) {
+      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
+    }
+    const participating = await this.sock.groupFetchAllParticipating();
+    return Object.values(participating).map((metadata) => ({
+      id: metadata.id,
+      name: metadata.subject,
+      // The enum's runtime values are exactly 'pn' | 'lid'; narrow to the public union.
+      addressingMode: metadata.addressingMode as GroupSummary['addressingMode'],
+    }));
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────────────---
