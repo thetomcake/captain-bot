@@ -116,12 +116,11 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
 
   const databasePath = optional('DATABASE_PATH', path.join(process.cwd(), 'captain-stats.db'));
 
-  // Scheduling defaults
-  const pollPostHour = parseInteger('POLL_POST_HOUR', 9); // 9am
+  // Stat capture window (FR-019). Scheduling knobs (POLL_POST_HOUR / FIXTURE_SYNC_INTERVAL) are
+  // gone — the MVP schedules nothing; poll posting is `!postpoll`/`poll`-triggered (research §8).
   const statCaptureDays = parseInteger('STAT_CAPTURE_DAYS', 3); // 3 days
-  const fixtureSyncInterval = parseInteger('FIXTURE_SYNC_INTERVAL', 86400); // 24 hours
 
-  // Timezone
+  // Timezone (default Europe/London)
   const timezone = optional('TIMEZONE', 'Europe/London');
 
   // Node environment
@@ -132,12 +131,27 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
     clubUrl,
     authorizedGroupId,
     databasePath,
-    pollPostHour,
     statCaptureDays,
-    fixtureSyncInterval,
     timezone,
     nodeEnv,
   };
+}
+
+/**
+ * Resolve the authorized group JID for group-dependent commands (`daemon`, `poll`).
+ *
+ * `AUTHORIZED_GROUP_ID` is optional in the loaded config (group-free commands like `fixtures`,
+ * `sync`, and `connect` do not need it), but `daemon`/`poll` require it. Callers map the thrown
+ * {@link ConfigError} to CLI exit code `3` (missing config — cli-commands.md).
+ */
+export function requireAuthorizedGroupId(config: EnvironmentConfig = getEnv()): string {
+  if (!config.authorizedGroupId) {
+    throw new ConfigError(
+      'AUTHORIZED_GROUP_ID is required for this command. Run "captain-stats connect" to ' +
+        'discover your group JID, then set AUTHORIZED_GROUP_ID in .env.'
+    );
+  }
+  return config.authorizedGroupId;
 }
 
 /**

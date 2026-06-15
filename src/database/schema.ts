@@ -42,26 +42,19 @@ export const seasons = sqliteTable(
 );
 
 // ============================================================================
-// AUTH STATES (WhatsApp authentication)
+// GATEWAY CREDENTIALS (opaque WhatsApp session snapshot, FR-008)
 // ============================================================================
 
-export const authStates = sqliteTable(
-  'auth_states',
-  {
-    id: text('id').primaryKey(), // Baileys key ID (e.g., 'creds', 'app-state-sync-key-*')
-    teamId: integer('team_id')
-      .notNull()
-      .references(() => teams.id),
-    seasonId: integer('season_id')
-      .notNull()
-      .references(() => seasons.id),
-    value: text('value').notNull(), // JSON-serialized with BufferJSON
-    updatedAt: timestamp('updated_at'),
-  },
-  (table) => ({
-    authIdx: index('idx_auth_team_season').on(table.teamId, table.seasonId),
-  })
-);
+// Replaces the Baileys-shaped `auth_states` table. The Gateway hands the MVP an
+// opaque `WhatsAppCredentials` string via onCredentialsUpdate/getCredentials; we
+// persist it verbatim (one row per team — single-operator MVP) and never parse it.
+export const gatewayCredentials = sqliteTable('gateway_credentials', {
+  teamId: integer('team_id')
+    .primaryKey()
+    .references(() => teams.id),
+  snapshot: text('snapshot').notNull(),
+  updatedAt: timestamp('updated_at'),
+});
 
 // ============================================================================
 // GAMES
@@ -94,7 +87,11 @@ export const games = sqliteTable(
 
 export const whatsappUsers = sqliteTable('whatsapp_users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  whatsappId: text('whatsapp_id').notNull().unique(),
+  // Keyed by the Gateway's canonical Identity (FR-013/SC-008): one row per person
+  // regardless of address form, so no double-counting across JID/LID/device forms.
+  canonicalId: text('canonical_id').notNull().unique(),
+  pn: text('pn'), // phone-number form, if known (debug/display)
+  lid: text('lid'), // LID form, if known
   displayName: text('display_name'),
   firstSeenAt: timestamp('first_seen_at'),
   lastSeenAt: timestamp('last_seen_at'),
@@ -111,18 +108,23 @@ export const polls = sqliteTable(
     gameId: integer('game_id')
       .notNull()
       .references(() => games.id),
-    whatsappMessageId: text('whatsapp_message_id').notNull(),
+    // The poll-creation message id = keyset `pollId` (a poll IS a message; one id, not two —
+    // see data-model.md "Poll identifiers"). Used for keyset lookup and deleteMessage.
+    pollMessageId: text('poll_message_id').notNull(),
+    // Keyset fields the MVP must persist to decrypt votes after a restart (FR-012/FR-014):
+    groupId: text('group_id').notNull(), // the authorized group JID the poll was posted to
+    messageSecret: text('message_secret').notNull(), // base64 of the poll's 32-byte secret, verbatim
     postedAt: integer('posted_at', { mode: 'timestamp' }).notNull(),
     pollQuestion: text('poll_question').notNull(),
     pollOptions: text('poll_options', { mode: 'json' }).notNull().$type<string[]>(),
   },
   (table) => ({
-    // One poll per game (FR-024): replacement hard-deletes the prior poll before
+    // One poll per game (FR-027): replacement hard-deletes the prior poll before
     // inserting, so this can never legitimately be violated and guards the
     // duplicate-row bug at the DB layer.
     uniqueGame: unique().on(table.gameId),
     gameIdx: index('idx_poll_game').on(table.gameId),
-    messageIdx: index('idx_poll_message').on(table.whatsappMessageId),
+    messageIdx: index('idx_poll_message').on(table.pollMessageId),
   })
 );
 
@@ -182,20 +184,21 @@ export const statRecords = sqliteTable(
 // DRIZZLE RELATIONS (for query builder)
 // ============================================================================
 
-export const teamsRelations = relations(teams, ({ many }) => ({
+export const teamsRelations = relations(teams, ({ one, many }) => ({
   seasons: many(seasons),
-  authStates: many(authStates),
+  gatewayCredentials: one(gatewayCredentials, {
+    fields: [teams.id],
+    references: [gatewayCredentials.teamId],
+  }),
 }));
 
 export const seasonsRelations = relations(seasons, ({ one, many }) => ({
   team: one(teams, { fields: [seasons.teamId], references: [teams.id] }),
   games: many(games),
-  authStates: many(authStates),
 }));
 
-export const authStatesRelations = relations(authStates, ({ one }) => ({
-  team: one(teams, { fields: [authStates.teamId], references: [teams.id] }),
-  season: one(seasons, { fields: [authStates.seasonId], references: [seasons.id] }),
+export const gatewayCredentialsRelations = relations(gatewayCredentials, ({ one }) => ({
+  team: one(teams, { fields: [gatewayCredentials.teamId], references: [teams.id] }),
 }));
 
 export const gamesRelations = relations(games, ({ one, many }) => ({
@@ -235,8 +238,8 @@ export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 export type Season = typeof seasons.$inferSelect;
 export type NewSeason = typeof seasons.$inferInsert;
-export type AuthState = typeof authStates.$inferSelect;
-export type NewAuthState = typeof authStates.$inferInsert;
+export type GatewayCredential = typeof gatewayCredentials.$inferSelect;
+export type NewGatewayCredential = typeof gatewayCredentials.$inferInsert;
 export type Game = typeof games.$inferSelect;
 export type NewGame = typeof games.$inferInsert;
 export type WhatsAppUser = typeof whatsappUsers.$inferSelect;

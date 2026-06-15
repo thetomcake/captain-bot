@@ -33,13 +33,12 @@ export interface Season {
 }
 
 /**
- * AuthState entity - stores WhatsApp authentication state
+ * GatewayCredential entity - opaque WhatsApp session snapshot (FR-008)
+ * Replaces the Baileys-shaped AuthState. The snapshot is persisted verbatim and never parsed.
  */
-export interface AuthState {
-  id: string; // Baileys key ID
+export interface GatewayCredential {
   teamId: number;
-  seasonId: number;
-  value: string; // JSON-serialized
+  snapshot: string; // opaque WhatsAppCredentials string
   updatedAt: Date;
 }
 
@@ -63,7 +62,9 @@ export interface Game {
  */
 export interface WhatsAppUser {
   id: number;
-  whatsappId: string; // JID format: *@s.whatsapp.net
+  canonicalId: string; // Gateway canonical Identity.canonicalId (one row per person, SC-008)
+  pn?: string | null; // phone-number form, if known
+  lid?: string | null; // LID form, if known
   displayName: string | null;
   firstSeenAt: Date;
   lastSeenAt: Date;
@@ -75,7 +76,9 @@ export interface WhatsAppUser {
 export interface Poll {
   id: number;
   gameId: number;
-  whatsappMessageId: string;
+  pollMessageId: string; // poll-creation message id = keyset pollId (one id, not two)
+  groupId: string; // keyset groupId — the authorized group the poll was posted to
+  messageSecret: string; // keyset messageSecret (base64, verbatim) — decrypts this poll's votes
   postedAt: Date;
   pollQuestion: string;
   pollOptions: string[]; // JSON-decoded array

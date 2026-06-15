@@ -1,57 +1,30 @@
 /**
- * WhatsApp-specific types for Baileys integration
+ * WhatsApp-facing types for the MVP.
+ *
+ * The MVP reaches WhatsApp exclusively through the Gateway port (FR-006/SC-011), so the
+ * Baileys-coupled types that used to live here (WhatsAppMessage / WhatsAppPoll /
+ * PollVoteResult / ConnectionState, plus the `proto`-dependent SendMessageOptions) are gone.
+ * Their Gateway equivalents are re-exported from the port below; only `ExtractedStats` — the
+ * pure stat-extractor output, which has no WhatsApp coupling — remains MVP-owned.
  */
 
-import type { proto } from '@whiskeysockets/baileys';
+// Re-export the Gateway domain types the MVP consumes, via the MVP-owned port (gateway-port.ts),
+// so call sites import WhatsApp shapes from one place without reaching into the Gateway directly.
+export type {
+  ConnectionStatus,
+  IncomingMessage,
+  MessageRef,
+  DeleteOutcome,
+  PollSpec,
+  PollSendResult,
+  PollVote,
+  GroupSummary,
+  Identity,
+  WhatsAppCredentials,
+} from '../whatsapp/gateway-port.js';
 
 /**
- * Simplified WhatsApp message structure
- */
-export interface WhatsAppMessage {
-  id: string;
-  fromMe: boolean;
-  remoteJid: string; // Group or user JID
-  text: string | null;
-  timestamp: Date;
-  participant?: string; // Sender JID in group messages
-}
-
-/**
- * WhatsApp poll structure
- */
-export interface WhatsAppPoll {
-  name: string; // Poll question
-  values: string[]; // Poll options
-  selectableCount: number; // How many options can be selected
-}
-
-/**
- * Poll vote aggregation result
- */
-export interface PollVoteResult {
-  optionName: string;
-  voters: string[]; // Array of voter JIDs
-  voteCount: number;
-}
-
-/**
- * WhatsApp connection state
- */
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'close';
-
-/**
- * WhatsApp event handlers
- */
-export interface WhatsAppEventHandlers {
-  onMessage?: (message: WhatsAppMessage) => void | Promise<void>;
-  onConnectionUpdate?: (state: ConnectionState) => void | Promise<void>;
-  onPollVote?: (messageId: string, votes: PollVoteResult[]) => void | Promise<void>;
-  onQRCode?: (qr: string) => void;
-  onAuthStateUpdate?: () => void | Promise<void>;
-}
-
-/**
- * Extracted stat data from message parsing
+ * Extracted stat data from message parsing (pure stat-extractor output, US3).
  */
 export interface ExtractedStats {
   goals?: number;
@@ -60,43 +33,4 @@ export interface ExtractedStats {
   foodTracking?: boolean;
   confidence: number; // 0-100
   rawText: string;
-}
-
-/**
- * WhatsApp group info
- */
-export interface GroupInfo {
-  id: string;
-  subject: string; // Group name
-  participants: Array<{
-    id: string;
-    isAdmin: boolean;
-  }>;
-  description?: string;
-}
-
-/**
- * Auth state structure for database storage
- */
-export interface AuthStateData {
-  creds: object;
-  keys: Record<string, object>;
-}
-
-/**
- * Message send options
- */
-export interface SendMessageOptions {
-  quoted?: proto.IWebMessageInfo;
-  ephemeralExpiration?: number;
-  disappearingMessagesInChat?: boolean;
-}
-
-/**
- * Rate limiter state for WhatsApp messaging
- */
-export interface RateLimiterState {
-  messagesSent: number;
-  windowStart: Date;
-  maxMessagesPerMinute: number;
 }

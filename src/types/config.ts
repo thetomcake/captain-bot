@@ -16,12 +16,10 @@ export interface EnvironmentConfig {
   // Database
   databasePath: string;
 
-  // Scheduling
-  pollPostHour: number;
+  // Stat capture window (days after a game that stat messages are accepted, FR-019)
   statCaptureDays: number;
-  fixtureSyncInterval: number;
 
-  // Timezone
+  // Timezone (fixture-date parsing + 3-day stat window; no longer drives any cron — research §8)
   timezone: string;
 
   // Node environment

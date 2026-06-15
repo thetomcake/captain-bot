@@ -1,14 +1,3 @@
-CREATE TABLE `auth_states` (
-	`id` text PRIMARY KEY NOT NULL,
-	`team_id` integer NOT NULL,
-	`season_id` integer NOT NULL,
-	`value` text NOT NULL,
-	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
-	FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`season_id`) REFERENCES `seasons`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE INDEX `idx_auth_team_season` ON `auth_states` (`team_id`,`season_id`);--> statement-breakpoint
 CREATE TABLE `games` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`season_id` integer NOT NULL,
@@ -24,6 +13,13 @@ CREATE TABLE `games` (
 --> statement-breakpoint
 CREATE INDEX `idx_game_date` ON `games` (`season_id`,`game_date`);--> statement-breakpoint
 CREATE INDEX `idx_game_status` ON `games` (`season_id`,`status`);--> statement-breakpoint
+CREATE TABLE `gateway_credentials` (
+	`team_id` integer PRIMARY KEY NOT NULL,
+	`snapshot` text NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `poll_responses` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`poll_id` integer NOT NULL,
@@ -39,7 +35,9 @@ CREATE UNIQUE INDEX `poll_responses_poll_id_user_id_unique` ON `poll_responses` 
 CREATE TABLE `polls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`game_id` integer NOT NULL,
-	`whatsapp_message_id` text NOT NULL,
+	`poll_message_id` text NOT NULL,
+	`group_id` text NOT NULL,
+	`message_secret` text NOT NULL,
 	`posted_at` integer NOT NULL,
 	`poll_question` text NOT NULL,
 	`poll_options` text NOT NULL,
@@ -47,7 +45,8 @@ CREATE TABLE `polls` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_poll_game` ON `polls` (`game_id`);--> statement-breakpoint
-CREATE INDEX `idx_poll_message` ON `polls` (`whatsapp_message_id`);--> statement-breakpoint
+CREATE INDEX `idx_poll_message` ON `polls` (`poll_message_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `polls_game_id_unique` ON `polls` (`game_id`);--> statement-breakpoint
 CREATE TABLE `seasons` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`team_id` integer NOT NULL,
@@ -90,10 +89,12 @@ CREATE TABLE `teams` (
 --> statement-breakpoint
 CREATE TABLE `whatsapp_users` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`whatsapp_id` text NOT NULL,
+	`canonical_id` text NOT NULL,
+	`pn` text,
+	`lid` text,
 	`display_name` text,
 	`first_seen_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`last_seen_at` integer DEFAULT (unixepoch()) NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `whatsapp_users_whatsapp_id_unique` ON `whatsapp_users` (`whatsapp_id`);
+CREATE UNIQUE INDEX `whatsapp_users_canonical_id_unique` ON `whatsapp_users` (`canonical_id`);

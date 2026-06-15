@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -9,7 +9,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export type TestDatabase = {
-  db: ReturnType<typeof drizzle>;
+  // Typed with the schema generic so the helper db is assignable to strictly-typed
+  // services/stores (e.g. `BetterSQLite3Database<typeof schema>`).
+  db: BetterSQLite3Database<typeof schema>;
   sqlite: Database.Database;
   close: () => void;
 };

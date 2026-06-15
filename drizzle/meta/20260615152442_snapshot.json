@@ -1,91 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "25ac5c7b-66eb-44e5-acca-65947b4ee599",
-  "prevId": "27a1328f-42e2-43da-b253-21d47e504ff7",
+  "id": "04b1a508-06a5-44b1-9681-a9c6edb57df0",
+  "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "auth_states": {
-      "name": "auth_states",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "season_id": {
-          "name": "season_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "value": {
-          "name": "value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        }
-      },
-      "indexes": {
-        "idx_auth_team_season": {
-          "name": "idx_auth_team_season",
-          "columns": [
-            "team_id",
-            "season_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "auth_states_team_id_teams_id_fk": {
-          "name": "auth_states_team_id_teams_id_fk",
-          "tableFrom": "auth_states",
-          "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "auth_states_season_id_seasons_id_fk": {
-          "name": "auth_states_season_id_seasons_id_fk",
-          "tableFrom": "auth_states",
-          "tableTo": "seasons",
-          "columnsFrom": [
-            "season_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "games": {
       "name": "games",
       "columns": {
@@ -180,6 +98,52 @@
           "tableTo": "seasons",
           "columnsFrom": [
             "season_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "gateway_credentials": {
+      "name": "gateway_credentials",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot": {
+          "name": "snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "gateway_credentials_team_id_teams_id_fk": {
+          "name": "gateway_credentials_team_id_teams_id_fk",
+          "tableFrom": "gateway_credentials",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
           ],
           "columnsTo": [
             "id"
@@ -298,8 +262,22 @@
           "notNull": true,
           "autoincrement": false
         },
-        "whatsapp_message_id": {
-          "name": "whatsapp_message_id",
+        "poll_message_id": {
+          "name": "poll_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message_secret": {
+          "name": "message_secret",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -338,7 +316,7 @@
         "idx_poll_message": {
           "name": "idx_poll_message",
           "columns": [
-            "whatsapp_message_id"
+            "poll_message_id"
           ],
           "isUnique": false
         },
@@ -658,11 +636,25 @@
           "notNull": true,
           "autoincrement": true
         },
-        "whatsapp_id": {
-          "name": "whatsapp_id",
+        "canonical_id": {
+          "name": "canonical_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "pn": {
+          "name": "pn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lid": {
+          "name": "lid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "display_name": {
@@ -690,10 +682,10 @@
         }
       },
       "indexes": {
-        "whatsapp_users_whatsapp_id_unique": {
-          "name": "whatsapp_users_whatsapp_id_unique",
+        "whatsapp_users_canonical_id_unique": {
+          "name": "whatsapp_users_canonical_id_unique",
           "columns": [
-            "whatsapp_id"
+            "canonical_id"
           ],
           "isUnique": true
         }

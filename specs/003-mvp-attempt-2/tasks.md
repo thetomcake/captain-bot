@@ -43,37 +43,37 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 
 ### Removal (delete Baileys-coupled MVP code)
 
-- [ ] T004 Delete the Baileys-bound WhatsApp modules: `src/whatsapp/client.ts`, `src/whatsapp/auth.ts`, `src/whatsapp/message-handler.ts`, `src/whatsapp/poll-manager.ts`.
-- [ ] T005 Delete the now-unused Baileys-era rate limiter `src/utils/rate-limiter.ts` (rate limiting is Gateway-owned, research §9) and remove its imports/usages from any MVP path.
-- [ ] T006 [P] Delete the obsolete test doubles/tests tied to removed code: `tests/helpers/mock-whatsapp.ts` and `tests/unit/whatsapp/poll-manager.test.ts`.
+- [X] T004 Delete the Baileys-bound WhatsApp modules: `src/whatsapp/client.ts`, `src/whatsapp/auth.ts`, `src/whatsapp/message-handler.ts`, `src/whatsapp/poll-manager.ts`.
+- [X] T005 Delete the now-unused Baileys-era rate limiter `src/utils/rate-limiter.ts` (rate limiting is Gateway-owned, research §9) and remove its imports/usages from any MVP path.
+- [X] T006 [P] Delete the obsolete test doubles/tests tied to removed code: `tests/helpers/mock-whatsapp.ts` and `tests/unit/whatsapp/poll-manager.test.ts`.
 
 ### Schema & migration (data-model.md)
 
-- [ ] T007 Update `src/database/schema.ts`: DROP `auth_states` and its relations; ADD `gateway_credentials` (`teamId` PK→`teams.id`, `snapshot` text NOT NULL, `updatedAt`); rename `whatsapp_users.whatsappId`→`canonicalId` (UNIQUE) and add nullable `pn`, `lid` (keep `displayName`/`firstSeenAt`/`lastSeenAt`); on `polls` rename `whatsappMessageId`→`pollMessageId` and add `groupId` text NOT NULL + `messageSecret` text NOT NULL. Leave `teams`/`seasons`/`games`/`stat_records`/`poll_responses` schema unchanged.
-- [ ] T008 Generate a fresh Drizzle migration for the schema in T007 via `npm run db:generate` (pre-release `v0.1.0` — a fresh migration may replace prior Baileys-era schema, data-model.md); verify `src/database/migrate.ts` applies cleanly against a `:memory:` DB.
+- [X] T007 Update `src/database/schema.ts`: DROP `auth_states` and its relations; ADD `gateway_credentials` (`teamId` PK→`teams.id`, `snapshot` text NOT NULL, `updatedAt`); rename `whatsapp_users.whatsappId`→`canonicalId` (UNIQUE) and add nullable `pn`, `lid` (keep `displayName`/`firstSeenAt`/`lastSeenAt`); on `polls` rename `whatsappMessageId`→`pollMessageId` and add `groupId` text NOT NULL + `messageSecret` text NOT NULL. Leave `teams`/`seasons`/`games`/`stat_records`/`poll_responses` schema unchanged.
+- [X] T008 Generate a fresh Drizzle migration for the schema in T007 via `npm run db:generate` (pre-release `v0.1.0` — a fresh migration may replace prior Baileys-era schema, data-model.md); verify `src/database/migrate.ts` applies cleanly against a `:memory:` DB.
 
 ### Types (data-model.md "Type-layer changes")
 
-- [ ] T009 [P] Update `src/types/entities.ts`: remove `AuthState`; add `GatewayCredential { teamId; snapshot; updatedAt }`; change `WhatsAppUser` `whatsappId`→`canonicalId` and add `pn?: string | null`, `lid?: string | null`; on `Poll` rename `whatsappMessageId`→`pollMessageId` and add `groupId: string`, `messageSecret: string`.
-- [ ] T010 [P] Rewrite `src/types/whatsapp.ts`: remove the `@whiskeysockets/baileys` `proto` import and the `WhatsAppMessage`/`PollVoteResult`/`ConnectionState`/`WhatsAppPoll` types; re-export the Gateway equivalents (`IncomingMessage`/`PollVote`/`ConnectionStatus`/`PollSpec`) via the port; keep `ExtractedStats`.
+- [X] T009 [P] Update `src/types/entities.ts`: remove `AuthState`; add `GatewayCredential { teamId; snapshot; updatedAt }`; change `WhatsAppUser` `whatsappId`→`canonicalId` and add `pn?: string | null`, `lid?: string | null`; on `Poll` rename `whatsappMessageId`→`pollMessageId` and add `groupId: string`, `messageSecret: string`.
+- [X] T010 [P] Rewrite `src/types/whatsapp.ts`: remove the `@whiskeysockets/baileys` `proto` import and the `WhatsAppMessage`/`PollVoteResult`/`ConnectionState`/`WhatsAppPoll` types; re-export the Gateway equivalents (`IncomingMessage`/`PollVote`/`ConnectionStatus`/`PollSpec`) via the port; keep `ExtractedStats`.
 
 ### Config
 
-- [ ] T011 [P] Update `src/config/env.ts`: make `AUTHORIZED_GROUP_ID` required for `daemon`/`poll` (drives exit code `3` when unset, cli-commands.md), default `TIMEZONE`=`Europe/London`, and drop any Baileys-era knobs no longer used.
+- [X] T011 [P] Update `src/config/env.ts`: make `AUTHORIZED_GROUP_ID` required for `daemon`/`poll` (drives exit code `3` when unset, cli-commands.md), default `TIMEZONE`=`Europe/London`, and drop any Baileys-era knobs no longer used.
 
 ### The seam (contracts/gateway-port.md)
 
-- [ ] T012 Create the MVP-owned port `src/whatsapp/gateway-port.ts` defining `IWhatsAppGateway` (connect/disconnect/isConnected/status/listGroups/sendMessage/sendPoll/deleteMessage + onQR/onConnectionChange/onMessage/onPollVote) and re-exporting the Gateway public types it references. The real `WhatsAppGateway` must satisfy it structurally.
-- [ ] T013 [P] Write the failing test `tests/integration/whatsapp/credentials-store.test.ts` for the credential store: `load(teamId)` returns `undefined` when empty and the saved snapshot after `save`; `save` upserts a single row and bumps `updatedAt` (real `:memory:` DB).
-- [ ] T014 Implement `src/whatsapp/credentials-store.ts` (`load(teamId)`/`save(teamId, snapshot)` against `gateway_credentials`, FR-008) to pass T013.
-- [ ] T015 Implement the Gateway factory `src/whatsapp/gateway-factory.ts` wiring a real `WhatsAppGateway`: `authorizedGroups`=`[AUTHORIZED_GROUP_ID]` (or `[]` for connect/discovery), `credentials` loaded via the credential store, `onCredentialsUpdate`→`credentials-store.save` (FR-008), `resolvePollKeyset(ref)`→the keyset store (T032, wired here), and the MVP logger adapted to the Gateway `Logger` shape (FR-025); leave `minMessageDelayMs`/`reconnect` at Gateway defaults (FR-010).
-- [ ] T016 [P] Create the test fake `tests/helpers/fake-gateway.ts` implementing `IWhatsAppGateway` in memory (replaces `mock-whatsapp.ts`): records `sentPolls` (with returned `keyset`), `sentMessages`, `deletedMessages`; exposes `failNextSendPoll`/`deleteOutcomeOverride` toggles, `simulateMessage(Partial<IncomingMessage>)`, `simulatePollVote(PollVote)`, and canonical `Identity` fixtures; imports NO Baileys.
+- [X] T012 Create the MVP-owned port `src/whatsapp/gateway-port.ts` defining `IWhatsAppGateway` (connect/disconnect/isConnected/status/listGroups/sendMessage/sendPoll/deleteMessage + onQR/onConnectionChange/onMessage/onPollVote) and re-exporting the Gateway public types it references. The real `WhatsAppGateway` must satisfy it structurally.
+- [X] T013 [P] Write the failing test `tests/integration/whatsapp/credentials-store.test.ts` for the credential store: `load(teamId)` returns `undefined` when empty and the saved snapshot after `save`; `save` upserts a single row and bumps `updatedAt` (real `:memory:` DB).
+- [X] T014 Implement `src/whatsapp/credentials-store.ts` (`load(teamId)`/`save(teamId, snapshot)` against `gateway_credentials`, FR-008) to pass T013.
+- [X] T015 Implement the Gateway factory `src/whatsapp/gateway-factory.ts` wiring a real `WhatsAppGateway`: `authorizedGroups`=`[AUTHORIZED_GROUP_ID]` (or `[]` for connect/discovery), `credentials` loaded via the credential store, `onCredentialsUpdate`→`credentials-store.save` (FR-008), `resolvePollKeyset(ref)`→the keyset store (T032, wired here), and the MVP logger adapted to the Gateway `Logger` shape (FR-025); leave `minMessageDelayMs`/`reconnect` at Gateway defaults (FR-010). **Impl note:** the keyset store (T027) is Phase 4, so `resolvePollKeyset` is implemented **inline** against the `polls` table (lookup by `pollMessageId == ref.pollId AND groupId`; reconstructed keyset or `null`). **T027 must move this resolver into `keyset-store.resolve` and have the factory delegate.** `createGateway` is async (loads the credential snapshot up front) and accepts `{ discovery, db }`.
+- [X] T016 [P] Create the test fake `tests/helpers/fake-gateway.ts` implementing `IWhatsAppGateway` in memory (replaces `mock-whatsapp.ts`): records `sentPolls` (with returned `keyset`), `sentMessages`, `deletedMessages`; exposes `failNextSendPoll`/`deleteOutcomeOverride` toggles, `simulateMessage(Partial<IncomingMessage>)`, `simulatePollVote(PollVote)`, and canonical `Identity` fixtures; imports NO Baileys.
 
 ### SC-011 guard
 
-- [ ] T017 Add the guard test `tests/integration/whatsapp/no-baileys-import.test.ts`: assert no file under `src/` **except** `src/whatsapp-gateway/**` imports/references `@whiskeysockets/baileys` (SC-011). Run it and confirm it passes after T004–T011.
+- [X] T017 Add the guard test `tests/integration/whatsapp/no-baileys-import.test.ts`: assert no file under `src/` **except** `src/whatsapp-gateway/**` imports/references `@whiskeysockets/baileys` (SC-011). Run it and confirm it passes after T004–T011.
 
-**Checkpoint**: Direct-Baileys code is gone, the seam compiles, the fake Gateway exists, and the SC-011 guard is green. User stories can now proceed.
+**Checkpoint**: Direct-Baileys code is gone, the seam compiles, the fake Gateway exists, and the SC-011 guard is green. User stories can now proceed. **Phase 2 note:** `src/cli/commands/connect.ts` was the lone remaining Baileys importer (direct `makeWASocket`) not covered by a deletion; it is reduced to a no-op stub (exit 4, "reworked in T044") so the SC-011 guard passes — **T044 supplies the real Gateway-native `connect`**. Downstream files reworked in later phases (`poll-service.ts` T028, `poll.ts` T030, `daemon.ts` T045) and their tests (`poll-service.test.ts` T024, `poll-command.test.ts` T025) still reference removed code and do **not** yet `tsc`/run — expected until their phases land.
 
 ---
 
