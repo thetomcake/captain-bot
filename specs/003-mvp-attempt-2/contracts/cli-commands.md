@@ -13,13 +13,14 @@ flags: `--config|-c <path>`, `--help|-h`, `--version|-v`, `--json`.
 | `sync` | US1/US5 | Manual fixture re-scrape; runs transition detection | `--team-id` | reflects updates (FR-003); may create a new season (FR-005) |
 | `stats` | US4 | View stored stats | `--game <id>`, `--season <n>`, `--json` | **NEW** (view-only this MVP) |
 | `seasons` | US4/US5 | List season history | `--json` | **NEW** |
-| `poll` | US2 | Post availability poll via Gateway | `[game-id]`, `--force`, `--dry-run`, `--json` | REWORK onto port |
+| `poll` | US2 | Post availability poll via Gateway | `--force`, `--dry-run`, `--json` | REWORK onto port. **No `[game-id]` arg** — the orchestration always targets the next confirmed fixture (dropped in T030). |
 | `connect` | US setup | Connect + list groups for `AUTHORIZED_GROUP_ID` | `--reset` | REWRITE on `connect()`+`listGroups()`; MVP renders QR |
 | `daemon` | US2/US3/US5 | Long-running monitor | `--foreground|-f`, `--log <path>` | REWORK on Gateway events only (no crons) |
 
 ## Exit codes (convention, preserved from current CLI)
 
-`0` success · `1` not-found/empty result · `2` missing/invalid prerequisite (e.g. no team) ·
+`0` success · `1` not-found/empty result · `2` missing/invalid prerequisite (e.g. no team) — also
+used by `poll` for **"a poll already exists for the next fixture and `--force` was not given"** ·
 `3` missing config (e.g. `AUTHORIZED_GROUP_ID` unset) · `4` runtime/connection failure.
 
 ## Command behaviour contracts
@@ -33,8 +34,9 @@ flags: `--config|-c <path>`, `--help|-h`, `--version|-v`, `--json`.
 ### `poll` (REWORK — admin escape hatch; the in-chat `!postpoll` is the primary path)
 - `--dry-run`: re-fetch fixtures, print the next fixture + question/options, send nothing, exit `0`.
 - Default: require `AUTHORIZED_GROUP_ID` (else exit `3`); re-fetch fixtures (FR-003); if no confirmed
-  next fixture, print why and exit `1`; refuse if a poll exists unless `--force` (FR-027 replacement);
-  `sendPoll` → persist keyset + poll row; print the poll ref. Exit `0`/`1`/`3`.
+  next fixture or the fetch failed, print why and exit `1` (FR-028); refuse if a poll exists unless
+  `--force`, printing "use --force to replace" and exiting `2` (FR-027 replacement);
+  `sendPoll` → persist keyset + poll row; print the poll ref. Exit `0`/`1`/`2`/`3`/`4`.
 
 ### `!postpoll` (in-chat command — handled by the daemon, NOT a CLI command)
 - Any authorized-group message whose whole text equals `!postpoll` (case-insensitive, trimmed) is

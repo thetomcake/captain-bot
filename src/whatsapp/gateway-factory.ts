@@ -6,15 +6,15 @@
  * reconnection, identity canonicalization and best-effort delete, so the factory leaves
  * `minMessageDelayMs`/`reconnect` at Gateway defaults (FR-010) and never re-implements them.
  */
-import { and, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { WhatsAppGateway } from '#src/whatsapp-gateway/index.js';
-import type { Logger as GatewayLogger, PollKeyset, PollRef } from '#src/whatsapp-gateway/index.js';
+import type { Logger as GatewayLogger } from '#src/whatsapp-gateway/index.js';
 import * as schema from '#src/database/schema.js';
 import { getDatabase } from '#src/database/client.js';
 import { getEnv, requireAuthorizedGroupId } from '#src/config/env.js';
 import { logger } from '#src/utils/logger.js';
 import { CredentialsStore } from './credentials-store.js';
+import { KeysetStore } from './keyset-store.js';
 
 export interface CreateGatewayOptions {
   /**
@@ -67,39 +67,17 @@ export async function createGateway(options: CreateGatewayOptions = {}): Promise
   const credentialsStore = new CredentialsStore(db);
   const credentials = await credentialsStore.load(teamId);
 
+  // Poll-keyset resolution is owned by the keyset store (T027); the Gateway calls it on demand.
+  const keysetStore = new KeysetStore(db);
+
   const authorizedGroups = options.discovery ? [] : [requireAuthorizedGroupId(env)];
 
   return new WhatsAppGateway({
     authorizedGroups,
     credentials,
     onCredentialsUpdate: (snapshot) => credentialsStore.save(teamId, snapshot),
-    resolvePollKeyset: (ref) => resolvePollKeyset(db, ref),
+    resolvePollKeyset: (ref) => keysetStore.resolve(ref),
     logger: adaptLogger(),
     // minMessageDelayMs / reconnect intentionally left at Gateway defaults (FR-010).
   });
-}
-
-/**
- * Reconstruct a poll's keyset from the `polls` row (FR-014). Looks the poll up by
- * `pollMessageId == ref.pollId AND groupId == ref.groupId`; returns `null` for an
- * unknown/replaced poll so the Gateway skips that vote without error.
- *
- * (T027 will move this into `keyset-store.resolve` and have the factory delegate to it.)
- */
-async function resolvePollKeyset(
-  db: BetterSQLite3Database<typeof schema>,
-  ref: PollRef
-): Promise<PollKeyset | null> {
-  const [poll] = await db
-    .select()
-    .from(schema.polls)
-    .where(and(eq(schema.polls.pollMessageId, ref.pollId), eq(schema.polls.groupId, ref.groupId)))
-    .limit(1);
-  if (!poll) return null;
-  return {
-    pollId: poll.pollMessageId,
-    groupId: poll.groupId,
-    messageSecret: poll.messageSecret,
-    options: poll.pollOptions,
-  };
 }

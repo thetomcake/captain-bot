@@ -146,7 +146,6 @@ async function main(): Promise<void> {
 
       const { pollCommand } = await import('./commands/poll.js');
       await pollCommand({
-        gameId: parsed._[1] ? parseInt(String(parsed._[1])) : undefined,
         force: parsed.force as boolean | undefined,
         dryRun: parsed['dry-run'] as boolean | undefined,
         json: parsed.json as boolean | undefined,

@@ -83,6 +83,7 @@ CREATE TABLE `teams` (
 	`name` text NOT NULL,
 	`club_url` text NOT NULL,
 	`whatsapp_group_id` text,
+	`last_poll_posted_at` integer,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL
 );

@@ -1,213 +1,172 @@
 /**
- * Poll service — orchestrates poll creation, posting, and response tracking
+ * Poll service (T028/T029) — reworked onto the {@link IWhatsAppGateway} port.
+ *
+ * Owns the on-demand poll lifecycle: re-fetch fixtures (FR-003) → post / force-replace the next
+ * confirmed fixture's availability poll → persist its keyset (FR-012) → fold each `onPollVote`
+ * delta into a durable, replace-by-voter tally keyed on the voter's canonical identity
+ * (FR-013/SC-008). The DB rows are the source of truth — never the Gateway's stateless
+ * `aggregateVotes` (research §3a).
  */
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
-import type { IWhatsAppClient } from '../whatsapp/client.js';
-import { PollManager } from '../whatsapp/poll-manager.js';
 import type { FixtureService } from './fixture-service.js';
-import type { PollVoteResult } from '../types/whatsapp.js';
-import type { Game, Poll } from '../types/entities.js';
+import type { Game, Poll, Season } from '../types/entities.js';
+import type {
+  IWhatsAppGateway,
+  Identity,
+  MessageRef,
+  PollVote,
+} from '../whatsapp/gateway-port.js';
+import { KeysetStore } from '../whatsapp/keyset-store.js';
+import { buildPollSpec } from '../whatsapp/poll-presenter.js';
 import { logger } from '../utils/logger.js';
 
 export interface PostPollOptions {
+  /** Replace an existing poll for the next fixture (FR-027). `!postpoll` always forces. */
   force?: boolean;
 }
 
-export class PollService {
-  private readonly pollManager: PollManager;
+/** Structured result of {@link PollService.postOrReplaceNextPoll}. */
+export type PostPollOutcome =
+  | { outcome: 'posted'; ref: MessageRef; fixture: Game }
+  | { outcome: 'replaced'; ref: MessageRef; fixture: Game }
+  | { outcome: 'exists'; fixture: Game }
+  | { outcome: 'no-fixture' }
+  | { outcome: 'fetch-failed'; error: string };
 
+/** Result of a non-sending {@link PollService.previewNextPoll} (the `--dry-run` path). */
+export type PreviewOutcome =
+  | { outcome: 'preview'; fixture: Game; question: string; options: string[] }
+  | { outcome: 'no-fixture' }
+  | { outcome: 'fetch-failed'; error: string };
+
+/** Internal result of re-fetching fixtures and picking the next confirmed one. */
+type NextFixture =
+  | { kind: 'fixture'; game: Game; teamId: number }
+  | { kind: 'no-fixture' }
+  | { kind: 'fetch-failed'; error: string };
+
+export class PollService {
   constructor(
     private readonly db: BetterSQLite3Database<typeof schema>,
     private readonly fixtureService: FixtureService,
-    private readonly client: IWhatsAppClient,
-    private readonly groupJid: string
-  ) {
-    this.pollManager = new PollManager(client);
-  }
+    private readonly gateway: IWhatsAppGateway,
+    private readonly groupId: string,
+    private readonly keysetStore: KeysetStore = new KeysetStore(db)
+  ) {}
 
   /**
-   * Post poll for a specific game; returns message ID or null if skipped/not found.
-   *
-   * On the create path (no existing poll, or `--force`) this hard-deletes any
-   * existing poll for the game before storing the new one, so a game never has
-   * more than one poll row (FR-024). Ordering is deliberate:
-   *   1. sendPoll()              — a send failure aborts before any DB mutation
-   *   2. removeExistingPollForGame() — cascade-delete old responses + poll row,
-   *                                    best-effort delete the old WhatsApp message
-   *   3. storePoll()             — delete-before-insert keeps the unique(gameId)
-   *                                constraint (T064g) satisfied
+   * Re-fetch fixtures on demand (FR-003), pick the next confirmed fixture, and post — or
+   * force-replace an existing poll (FR-027). Shared by the `!postpoll` trigger and the `poll` CLI.
    */
-  async postPollForGame(
-    gameId: number,
-    options: PostPollOptions = {}
-  ): Promise<string | null> {
-    const game = await this.fixtureService.getGame(gameId);
-    if (!game) return null;
+  async postOrReplaceNextPoll(options: PostPollOptions = {}): Promise<PostPollOutcome> {
+    const next = await this.resolveNextFixture();
+    if (next.kind === 'no-fixture') return { outcome: 'no-fixture' };
+    if (next.kind === 'fetch-failed') return { outcome: 'fetch-failed', error: next.error };
 
-    const existing = await this.getPoll(gameId);
-    if (!options.force && existing) {
-      return null;
+    const game = next.game;
+    const existing = await this.getPoll(game.id);
+    if (existing && !options.force) {
+      return { outcome: 'exists', fixture: game };
     }
 
-    const messageId = await this.pollManager.sendPoll(game, this.groupJid);
+    // Send first: a send failure aborts before any DB mutation (the existing poll survives).
+    const spec = buildPollSpec(game);
+    const { ref, keyset } = await this.gateway.sendPoll(this.groupId, spec);
 
     if (existing) {
-      await this.removeExistingPollForGame(game);
+      await this.removeExistingPoll(existing);
     }
+    await this.keysetStore.persist({
+      gameId: game.id,
+      question: spec.question,
+      postedAt: new Date(),
+      keyset,
+    });
+    // Stamp the post time so the `!postpoll` throttle (T051) can ignore rapid re-triggers.
+    await this.recordPollPosted(next.teamId);
 
-    await this.storePoll(game, messageId);
-    return messageId;
+    const outcome = existing ? 'replaced' : 'posted';
+    logger.info(`Poll ${outcome} for game ${game.id} (${game.opponent})`, {
+      pollMessageId: ref.id,
+      groupId: this.groupId,
+    });
+    return { outcome, ref, fixture: game };
   }
 
   /**
-   * Post poll for the next upcoming game for a team
+   * Re-fetch fixtures and describe the poll that *would* be posted, without sending (`--dry-run`).
    */
-  async postPollForNextGame(
-    teamId: number,
-    options: PostPollOptions = {}
-  ): Promise<string | null> {
-    const game = await this.getNextGame(teamId);
-    if (!game) return null;
-    return this.postPollForGame(game.id, options);
+  async previewNextPoll(): Promise<PreviewOutcome> {
+    const next = await this.resolveNextFixture();
+    if (next.kind === 'no-fixture') return { outcome: 'no-fixture' };
+    if (next.kind === 'fetch-failed') return { outcome: 'fetch-failed', error: next.error };
+
+    const spec = buildPollSpec(next.game);
+    return {
+      outcome: 'preview',
+      fixture: next.game,
+      question: spec.question,
+      options: spec.options,
+    };
   }
 
   /**
-   * Find the next upcoming game for a team
+   * Process an `onPollVote` delta as the durable tally (FR-013): resolve the voter by canonical
+   * identity (get-or-create), then upsert their `poll_responses` row — or delete it on an empty
+   * selection (withdrawal). Votes for an unknown/replaced poll are ignored.
    */
-  async getNextGame(teamId: number): Promise<Game | null> {
-    const season = await this.getTeamCurrentSeason(teamId);
-    if (!season) return null;
-
-    const upcoming = await this.fixtureService.getUpcomingFixtures(season.id);
-    return upcoming[0] ?? null;
-  }
-
-  /**
-   * Check if a poll has been posted for the given game
-   */
-  async hasPollForGame(gameId: number): Promise<boolean> {
-    const poll = await this.getPoll(gameId);
-    return poll !== null;
-  }
-
-  /**
-   * Get the poll for a game, or null if none.
-   *
-   * The unique(gameId) constraint (T064g) guarantees at most one row; the
-   * `postedAt DESC` ordering is defence-in-depth so the most recent poll always
-   * wins even if a stray duplicate ever slips past the constraint.
-   */
-  async getPoll(gameId: number): Promise<Poll | null> {
+  async handlePollVote(vote: PollVote): Promise<void> {
     const [poll] = await this.db
       .select()
       .from(schema.polls)
-      .where(eq(schema.polls.gameId, gameId))
-      .orderBy(desc(schema.polls.postedAt))
+      .where(
+        and(
+          eq(schema.polls.pollMessageId, vote.pollId),
+          eq(schema.polls.groupId, vote.groupId)
+        )
+      )
       .limit(1);
-
-    return poll ?? null;
-  }
-
-  /**
-   * Process incoming poll vote events from WhatsApp
-   */
-  async handlePollVote(messageId: string, votes: PollVoteResult[]): Promise<void> {
-    const [poll] = await this.db
-      .select()
-      .from(schema.polls)
-      .where(eq(schema.polls.whatsappMessageId, messageId))
-      .limit(1);
-
     if (!poll) return;
 
-    for (const vote of votes) {
-      for (const voterJid of vote.voters) {
-        await this.upsertPollResponse(poll.id, voterJid, vote.optionName);
-      }
+    const user = await this.getOrCreateUser(vote.voter);
+
+    if (vote.selectedOptions.length === 0) {
+      // Withdrawal — remove the voter's row entirely.
+      await this.db
+        .delete(schema.pollResponses)
+        .where(
+          and(
+            eq(schema.pollResponses.pollId, poll.id),
+            eq(schema.pollResponses.userId, user.id)
+          )
+        );
+      return;
     }
-  }
 
-  /**
-   * Record a poll response; upserts so a voter can change their answer
-   */
-  async recordPollResponse(
-    pollId: number,
-    userJid: string,
-    selectedOption: string
-  ): Promise<void> {
-    const messageId = await this.getMessageIdForPoll(pollId);
-    await this.handlePollVote(messageId, [
-      { optionName: selectedOption, voters: [userJid], voteCount: 1 },
-    ]);
-  }
-
-  // ── Private helpers ──────────────────────────────────────────────────────
-
-  /**
-   * Remove the existing poll for a game (FR-024 replacement): cascade-delete its
-   * responses, then the poll row, then best-effort delete the old WhatsApp
-   * message. A WhatsApp delete failure is logged and swallowed so the
-   * replacement always completes.
-   */
-  private async removeExistingPollForGame(game: Game): Promise<void> {
-    const existing = await this.getPoll(game.id);
-    if (!existing) return;
-
-    // Cascade: responses reference the poll, so they must go first.
-    await this.db
-      .delete(schema.pollResponses)
-      .where(eq(schema.pollResponses.pollId, existing.id));
-
-    await this.db.delete(schema.polls).where(eq(schema.polls.id, existing.id));
-
-    // Best-effort: removing the WhatsApp message is not allowed to fail the
-    // replacement (FR-024). The logger timestamps every line.
-    try {
-      await this.client.deleteMessage(this.groupJid, existing.whatsappMessageId);
-    } catch (error) {
-      logger.warn('Failed to delete old WhatsApp poll message during replacement', {
-        gameId: game.id,
-        whatsappMessageId: existing.whatsappMessageId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  private async storePoll(game: Game, messageId: string): Promise<void> {
-    await this.db.insert(schema.polls).values({
-      gameId: game.id,
-      whatsappMessageId: messageId,
-      postedAt: new Date(),
-      pollQuestion: this.pollManager.formatPollQuestion(game),
-      pollOptions: this.pollManager.getPollOptions(),
-    });
-  }
-
-  private async upsertPollResponse(
-    pollId: number,
-    userJid: string,
-    option: string
-  ): Promise<void> {
-    const user = await this.getOrCreateUser(userJid);
-
-    const allResponses = await this.db
+    // Single-choice availability poll: the first (only) selection is authoritative.
+    const option = vote.selectedOptions[0]!;
+    const [existing] = await this.db
       .select()
       .from(schema.pollResponses)
-      .where(eq(schema.pollResponses.pollId, pollId));
+      .where(
+        and(
+          eq(schema.pollResponses.pollId, poll.id),
+          eq(schema.pollResponses.userId, user.id)
+        )
+      )
+      .limit(1);
 
-    const userResponse = allResponses.find(r => r.userId === user.id);
-
-    if (userResponse) {
+    if (existing) {
       await this.db
         .update(schema.pollResponses)
         .set({ selectedOption: option, respondedAt: new Date() })
-        .where(eq(schema.pollResponses.id, userResponse.id));
+        .where(eq(schema.pollResponses.id, existing.id));
     } else {
       await this.db.insert(schema.pollResponses).values({
-        pollId,
+        pollId: poll.id,
         userId: user.id,
         selectedOption: option,
         respondedAt: new Date(),
@@ -215,55 +174,137 @@ export class PollService {
     }
   }
 
+  /** Get the poll for a game, or null if none. */
+  async getPoll(gameId: number): Promise<Poll | null> {
+    const [poll] = await this.db
+      .select()
+      .from(schema.polls)
+      .where(eq(schema.polls.gameId, gameId))
+      .limit(1);
+    return poll ?? null;
+  }
+
+  /** Whether a poll has been posted for the given game. */
+  async hasPollForGame(gameId: number): Promise<boolean> {
+    return (await this.getPoll(gameId)) !== null;
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Re-fetch fixtures from the club site (FR-003) and pick the next confirmed upcoming fixture.
+   * A scrape error becomes `fetch-failed`; placeholder/TBD fixtures are skipped by the scraper, so
+   * "nothing confirmed" surfaces as `no-fixture`.
+   */
+  private async resolveNextFixture(): Promise<NextFixture> {
+    const [team] = await this.db.select().from(schema.teams).limit(1);
+    if (!team) return { kind: 'no-fixture' };
+
+    try {
+      await this.fixtureService.syncFixtures(team.id);
+    } catch (error) {
+      return { kind: 'fetch-failed', error: error instanceof Error ? error.message : String(error) };
+    }
+
+    const season = await this.getCurrentSeason(team.id);
+    if (!season) return { kind: 'no-fixture' };
+
+    const upcoming = await this.fixtureService.getUpcomingFixtures(season.id);
+    const game = upcoming[0];
+    return game ? { kind: 'fixture', game, teamId: team.id } : { kind: 'no-fixture' };
+  }
+
+  /**
+   * The last time a poll was posted/replaced for the (single-operator) team, or `null` if none yet.
+   * The `!postpoll` trigger reads this to enforce its 5-minute throttle (T051); the `poll` CLI
+   * (admin escape hatch) does not consult it.
+   */
+  async getLastPollPostedAt(): Promise<Date | null> {
+    const [team] = await this.db
+      .select({ at: schema.teams.lastPollPostedAt })
+      .from(schema.teams)
+      .limit(1);
+    return team?.at ?? null;
+  }
+
+  /** Record that a poll was just posted/replaced, for the throttle window (T051). */
+  private async recordPollPosted(teamId: number): Promise<void> {
+    await this.db
+      .update(schema.teams)
+      .set({ lastPollPostedAt: new Date() })
+      .where(eq(schema.teams.id, teamId));
+  }
+
+  /**
+   * Replace an existing poll (FR-027): hard-delete its responses then the poll row, then
+   * best-effort delete the WhatsApp message. A failed delete is logged and swallowed — it must
+   * never block the replacement (the Gateway's `deleteMessage` never throws).
+   */
+  private async removeExistingPoll(poll: Poll): Promise<void> {
+    await this.db
+      .delete(schema.pollResponses)
+      .where(eq(schema.pollResponses.pollId, poll.id));
+    await this.db.delete(schema.polls).where(eq(schema.polls.id, poll.id));
+
+    const outcome = await this.gateway.deleteMessage({
+      id: poll.pollMessageId,
+      groupId: poll.groupId,
+    });
+    if (!outcome.ok) {
+      logger.warn('Failed to delete old WhatsApp poll message during replacement', {
+        gameId: poll.gameId,
+        pollMessageId: poll.pollMessageId,
+        reason: outcome.reason,
+      });
+    }
+  }
+
+  private async getCurrentSeason(teamId: number): Promise<Season | null> {
+    const [season] = await this.db
+      .select()
+      .from(schema.seasons)
+      .where(and(eq(schema.seasons.teamId, teamId), eq(schema.seasons.isCurrent, true)))
+      .limit(1);
+    return season ?? null;
+  }
+
+  /**
+   * Resolve a voter to a single `whatsapp_users` row keyed on `canonicalId` (one row per person,
+   * SC-008). Backfills `pn`/`lid`/`displayName` as later address forms reveal them.
+   */
   private async getOrCreateUser(
-    whatsappId: string
+    identity: Identity
   ): Promise<typeof schema.whatsappUsers.$inferSelect> {
     const [existing] = await this.db
       .select()
       .from(schema.whatsappUsers)
-      .where(eq(schema.whatsappUsers.whatsappId, whatsappId))
+      .where(eq(schema.whatsappUsers.canonicalId, identity.canonicalId))
       .limit(1);
 
     if (existing) {
       await this.db
         .update(schema.whatsappUsers)
-        .set({ lastSeenAt: new Date() })
+        .set({
+          lastSeenAt: new Date(),
+          pn: identity.pn ?? existing.pn,
+          lid: identity.lid ?? existing.lid,
+          displayName: identity.displayHint ?? existing.displayName,
+        })
         .where(eq(schema.whatsappUsers.id, existing.id));
       return existing;
     }
 
-    const [newUser] = await this.db
+    const [created] = await this.db
       .insert(schema.whatsappUsers)
       .values({
-        whatsappId,
+        canonicalId: identity.canonicalId,
+        pn: identity.pn ?? null,
+        lid: identity.lid ?? null,
+        displayName: identity.displayHint ?? null,
         firstSeenAt: new Date(),
         lastSeenAt: new Date(),
       })
       .returning();
-
-    return newUser!;
-  }
-
-  private async getMessageIdForPoll(pollId: number): Promise<string> {
-    const [poll] = await this.db
-      .select()
-      .from(schema.polls)
-      .where(eq(schema.polls.id, pollId))
-      .limit(1);
-
-    if (!poll) throw new Error(`Poll not found: ${pollId}`);
-    return poll.whatsappMessageId;
-  }
-
-  private async getTeamCurrentSeason(
-    teamId: number
-  ): Promise<typeof schema.seasons.$inferSelect | null> {
-    const [season] = await this.db
-      .select()
-      .from(schema.seasons)
-      .where(eq(schema.seasons.teamId, teamId))
-      .limit(1);
-
-    return season ?? null;
+    return created!;
   }
 }

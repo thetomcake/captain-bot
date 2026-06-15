@@ -14,6 +14,10 @@ export const teams = sqliteTable('teams', {
   name: text('name').notNull(),
   clubUrl: text('club_url').notNull(),
   whatsappGroupId: text('whatsapp_group_id'),
+  // Last time an availability poll was posted/replaced for this team (any path). Backs the
+  // `!postpoll` 5-minute throttle (T051): chat triggers arriving inside the window are ignored
+  // so a member cannot spam-replace the poll. Null until the first poll is posted.
+  lastPollPostedAt: integer('last_poll_posted_at', { mode: 'timestamp' }),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });

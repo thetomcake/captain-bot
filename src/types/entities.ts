@@ -15,6 +15,7 @@ export interface Team {
   name: string;
   clubUrl: string;
   whatsappGroupId: string | null;
+  lastPollPostedAt: Date | null; // last poll post/replace time; backs the !postpoll throttle (T051)
   createdAt: Date;
   updatedAt: Date;
 }

@@ -2,145 +2,125 @@ import { getDatabase } from '../../database/client.js';
 import { SeasonService } from '../../services/season-service.js';
 import { FixtureService } from '../../services/fixture-service.js';
 import { PollService } from '../../services/poll-service.js';
-import type { IWhatsAppClient } from '../../whatsapp/client.js';
+import { createGateway } from '../../whatsapp/gateway-factory.js';
+import type { IWhatsAppGateway } from '../../whatsapp/gateway-port.js';
 
 export interface PollCommandOptions {
-  gameId?: number;
   force?: boolean;
   dryRun?: boolean;
   json?: boolean;
 }
 
+export interface PollCommandDeps {
+  /** Inject a fake Gateway in tests; production builds one via the factory. */
+  gateway?: IWhatsAppGateway;
+  /** Inject a FixtureService over a static-HTML scraper in tests (never a real fetch). */
+  fixtureService?: FixtureService;
+}
+
 /**
- * Poll command — post availability poll to WhatsApp group
+ * `poll` command (T030) — the admin escape hatch for the in-chat `!postpoll` trigger.
  *
- * Accepts an optional `clientOverride` so tests can inject MockWhatsAppClient
- * without touching the real Baileys connection.
+ * Re-fetches fixtures on demand (FR-003) and posts the next confirmed fixture's availability poll
+ * via the Gateway port, or force-replaces an existing one (FR-027). `--dry-run` previews without
+ * sending. Exit codes (cli-commands.md): `0` success · `1` no confirmed fixture / fetch failure
+ * (FR-028) · `2` poll exists and `--force` not given · `3` `AUTHORIZED_GROUP_ID` unset · `4`
+ * runtime/connection failure.
  */
 export async function pollCommand(
   options: PollCommandOptions = {},
-  clientOverride?: IWhatsAppClient
+  deps: PollCommandDeps = {}
 ): Promise<void> {
   try {
     const { db } = getDatabase();
 
-    // Require authorized group ID
-    const groupJid = process.env.AUTHORIZED_GROUP_ID;
-    if (!groupJid) {
+    const groupId = process.env.AUTHORIZED_GROUP_ID;
+    if (!groupId) {
       console.error(
-        'Error: AUTHORIZED_GROUP_ID not set. Run "captain-stats daemon" first to authorize a WhatsApp group.'
+        'Error: AUTHORIZED_GROUP_ID not set. Run "captain-stats connect" to discover your ' +
+          'group JID, then set AUTHORIZED_GROUP_ID in .env.'
       );
       process.exit(3);
       return;
     }
 
-    const seasonService = new SeasonService(db);
-    const fixtureService = new FixtureService(db, seasonService);
+    const fixtureService =
+      deps.fixtureService ?? new FixtureService(db, new SeasonService(db));
 
-    // Resolve team ID (MVP: always team 1)
-    const teamId = 1;
-
-    // Find game to poll for
-    let targetGameId: number | undefined = options.gameId;
-
-    if (!targetGameId) {
-      const season = await seasonService.getCurrentSeason(teamId);
-      if (!season) {
-        console.error('No current season found. Run "captain-stats init" first.');
-        process.exit(3);
-        return;
-      }
-
-      const upcoming = await fixtureService.getUpcomingFixtures(season.id);
-      if (upcoming.length === 0) {
-        console.error('No upcoming games found.');
+    // Dry run — re-fetch + preview, send nothing.
+    if (options.dryRun) {
+      const previewService = new PollService(db, fixtureService, deps.gateway as IWhatsAppGateway, groupId);
+      const preview = await previewService.previewNextPoll();
+      if (preview.outcome === 'fetch-failed') {
+        console.error(`Could not reach the club site: ${preview.error}`);
         process.exit(1);
         return;
       }
-
-      targetGameId = upcoming[0]!.id;
-    }
-
-    const game = await fixtureService.getGame(targetGameId);
-    if (!game) {
-      console.error(`Game not found: ${targetGameId}`);
-      process.exit(1);
-      return;
-    }
-
-    const dateStr = game.gameDate.toLocaleDateString('en-GB', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-    const timeStr = game.gameDate.toLocaleTimeString('en-GB', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    // Dry run — show what would be sent without sending
-    if (options.dryRun) {
-      console.log('Dry run — poll would be posted:');
-      console.log('');
-      console.log(`Game: ${dateStr} ${timeStr} vs ${game.opponent} at ${game.venue}`);
-      console.log('Poll question: Available vs ' + game.opponent + '?');
-      console.log('Options: Yes / No / Maybe');
+      if (preview.outcome === 'no-fixture') {
+        console.error('No confirmed next fixture to poll.');
+        process.exit(1);
+        return;
+      }
+      if (options.json) {
+        console.log(
+          JSON.stringify({
+            dryRun: true,
+            opponent: preview.fixture.opponent,
+            question: preview.question,
+            options: preview.options,
+          })
+        );
+      } else {
+        console.log('Dry run — poll would be posted:');
+        console.log('');
+        console.log(`Next fixture: vs ${preview.fixture.opponent} at ${preview.fixture.venue}`);
+        console.log(`Question: ${preview.question}`);
+        console.log(`Options: ${preview.options.join(' / ')}`);
+      }
       process.exit(0);
       return;
     }
 
-    // Build client: prefer injected mock, otherwise require real connection
-    let client: IWhatsAppClient;
-    if (clientOverride) {
-      client = clientOverride;
-    } else {
-      // Lazy-import real client to keep test imports fast
-      const { WhatsAppClient } = await import('../../whatsapp/client.js');
-      const season = await seasonService.getCurrentSeason(teamId);
-      if (!season) {
-        console.error('No current season found.');
-        process.exit(3);
+    const gateway = deps.gateway ?? (await createGateway());
+    if (!gateway.isConnected()) {
+      await gateway.connect();
+    }
+
+    const pollService = new PollService(db, fixtureService, gateway, groupId);
+    const result = await pollService.postOrReplaceNextPoll({ force: options.force });
+
+    switch (result.outcome) {
+      case 'fetch-failed':
+        console.error(`Could not reach the club site: ${result.error}`);
+        process.exit(1);
+        return;
+      case 'no-fixture':
+        console.error('No confirmed next fixture to poll.');
+        process.exit(1);
+        return;
+      case 'exists':
+        console.error('Poll already posted for the next fixture. Use --force to replace it.');
+        process.exit(2);
+        return;
+      case 'posted':
+      case 'replaced': {
+        if (options.json) {
+          console.log(
+            JSON.stringify({
+              outcome: result.outcome,
+              pollMessageId: result.ref.id,
+              opponent: result.fixture.opponent,
+            })
+          );
+        } else {
+          const verb = result.outcome === 'replaced' ? 'replaced' : 'posted';
+          console.log(`✓ Poll ${verb} for the next fixture vs ${result.fixture.opponent}`);
+          console.log(`✓ Poll ref: ${result.ref.id}`);
+        }
+        process.exit(0);
         return;
       }
-      client = new WhatsAppClient(db, teamId, season.id, groupJid);
     }
-
-    const pollService = new PollService(db, fixtureService, client, groupJid);
-
-    // Check if already posted
-    if (!options.force && (await pollService.hasPollForGame(targetGameId))) {
-      console.error(
-        'Poll already posted for this game. Use --force to post again.'
-      );
-      process.exit(2);
-      return;
-    }
-
-    // Connect if not already connected
-    if (!client.isConnected()) {
-      await client.connect();
-    }
-
-    const messageId = await pollService.postPollForGame(targetGameId, {
-      force: options.force,
-    });
-
-    if (!messageId) {
-      console.error('Failed to post poll.');
-      process.exit(3);
-      return;
-    }
-
-    console.log('Posting availability poll...');
-    console.log('');
-    console.log(`Game: ${dateStr} ${timeStr} vs ${game.opponent} at ${game.venue}`);
-    console.log('✓ Poll posted to WhatsApp group');
-    console.log(`✓ Poll ID: ${messageId}`);
-    console.log('');
-    console.log('Players can now respond with their availability.');
-
-    process.exit(0);
   } catch (error) {
     if (options.json) {
       console.log(
