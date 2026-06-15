@@ -162,6 +162,10 @@ This is an **intentional design change**, not a defect — **commit `b7a9f7b` (R
 
 **Failure modes (FR-028)**: WhatsApp enforces a revoke window (historically ~2 days; not guaranteed) — past it, delete is rejected; deleting an unknown/already-gone message no-ops or errors. The Gateway must `try/catch`, report a clear non-fatal failure, and continue (mirrors the MVP's "best-effort delete, log a warning, never block" rule from spec 001 FR-024).
 
+**Re-verified at implementation time (2026-06-15, FR-031) — the revoke is FIRE-AND-FORGET.** Tracing the installed `7.0.0-rc13` source: `sendMessage({ delete })` builds a `REVOKE` protocolMessage (`lib/Utils/messages.js`) and `relayMessage` ends at `await sendNode(stanza)` → `sendRawMessage`, a bare WebSocket write (`lib/Socket/socket.js` `sendNode`/`sendRawMessage`). Unlike `query()`, the message send path **never calls `waitForMessage`** — no server ack is awaited. **Consequence:** a server-side rejection (revoke-window elapsed, message already gone, insufficient privilege) is **never surfaced as a thrown error** — it fails silently server-side. A grep of `lib/` confirms no thrown error in the send path mentions "window"/"expired"/"too old"/"not found"/"no such"/"does not exist". The only errors that can reach the `try/catch` are transport/precondition Boom errors: `428` Connection Closed, `408` Timed Out, `503` unavailable (→ `network`), and `500` "All encryptions failed" / `401` "Not authenticated" (→ `unknown`).
+
+So in the `DeleteOutcome` contract, only `network` and `unknown` are produced; **`window-expired` and `not-found` are reserved** (kept in the union for forward-compat) — they are not synchronously detectable. And `{ ok: true }` means the revoke stanza was **sent**, not that WhatsApp confirmed removal (an out-of-window / unknown-id revoke still returns `{ ok: true }`). Classification lives in the pure, unit-tested `messages/delete-classifier.ts`.
+
 ---
 
 ## 9. Encryption / decryption

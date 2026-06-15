@@ -96,7 +96,7 @@ WA_GROUP_ID=<jid> WA_POLL_QUESTION="Available next game?" WA_POLL_OPTIONS="Yes,N
 WA_GROUP_ID=<jid> WA_MESSAGE_ID=<id-from-send> WA_CREDS_FILE=./.wa-creds.json \
   npx tsx src/whatsapp-gateway/bin/delete-message.ts
 ```
-**Expect**: a recently-sent message is revoked for everyone → `{ ok: true }`. Attempt an out-of-window/unknown id → `{ ok: false, reason }` printed clearly, **no crash**. **Pass**: FR-027, FR-028 / SC-006.
+**Expect**: a recently-sent (in-window) message is revoked for everyone and disappears from the group → `{ ok: true }`. Note: the revoke is **fire-and-forget** (WhatsApp sends no ack — research.md §8), so an out-of-window or unknown id **also** prints `{ ok: true }` (the stanza is sent; the server silently ignores it — it is *not* reported as a failure) and the script still exits cleanly. The only `{ ok: false, reason: 'network' }` path is killing the connection mid-delete. The invariant to confirm is **no crash** in any case. **Pass**: FR-027, FR-028 / SC-006.
 
 ---
 

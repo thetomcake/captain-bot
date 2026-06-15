@@ -25,6 +25,7 @@ import type {
 } from '@whiskeysockets/baileys';
 import type {
   ConnectionStatus,
+  DeleteOutcome,
   GatewayConfig,
   GroupSummary,
   IncomingMessage,
@@ -42,6 +43,7 @@ import { resolveConfig, type ResolvedGatewayConfig } from './config.js';
 import { requireConnected } from './connection/require-connected.js';
 import { createAuthStore, type AuthStore } from './auth/auth-state.js';
 import { MessageStore, messageStoreKey } from './messages/message-store.js';
+import { classifyDeleteError } from './messages/delete-classifier.js';
 import { GroupFilter } from './groups/group-filter.js';
 import { IdentityResolver } from './identity/identity-resolver.js';
 import { RateLimiter } from './rate-limiter.js';
@@ -212,12 +214,8 @@ export class WhatsAppGateway {
    * `GroupMetadata`; we project only the public fields so no Baileys type leaks out (FR-003).
    */
   async listGroups(): Promise<GroupSummary[]> {
-    requireConnected(this.reducerState.status);
-    // requireConnected guarantees we are 'connected', which only happens with a live socket.
-    if (!this.sock) {
-      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
-    }
-    const participating = await this.sock.groupFetchAllParticipating();
+    const sock = this.connectedSocket();
+    const participating = await sock.groupFetchAllParticipating();
     return Object.values(participating).map((metadata) => {
       // The enum's runtime values are exactly 'pn' | 'lid'; narrow to the public union.
       const addressingMode = metadata.addressingMode as GroupSummary['addressingMode'];
@@ -241,12 +239,7 @@ export class WhatsAppGateway {
    * `Promise<WAMessage | undefined>` (the `undefined` is handled).
    */
   async sendMessage(groupId: string, text: string): Promise<MessageRef> {
-    requireConnected(this.reducerState.status);
-    // requireConnected guarantees 'connected', which only holds with a live socket.
-    if (!this.sock) {
-      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
-    }
-    const sock = this.sock;
+    const sock = this.connectedSocket();
     const sent = await this.sendLimiter.execute(() => sock.sendMessage(groupId, { text }));
     if (!sent?.key?.id) {
       throw new Error('WhatsAppGateway: sendMessage returned no usable message reference');
@@ -254,6 +247,57 @@ export class WhatsAppGateway {
     // Cache the outbound message for getMessage send-retries (§2).
     this.messageStore.set(sent);
     return { id: sent.key.id, groupId };
+  }
+
+  /**
+   * Best-effort revoke (delete-for-everyone) of a message/poll the Gateway previously sent
+   * (US5, FR-027/FR-028). Guards via `requireConnected`. Per the official Baileys docs the
+   * revoke is itself a send — `sock.sendMessage(jid, { delete: messageKey })` — so it is
+   * rate-limited like the other outbound sends to keep the ban-risk profile consistent (FR-016).
+   *
+   * Uses the real cached message `key` when the message is still in the in-session store (the
+   * documented `{ delete: msg.key }` pattern), else reconstructs a Gateway-sent key
+   * (`fromMe: true` + the stored id — research.md §161). NEVER throws on a WhatsApp/socket
+   * rejection: the failure is classified into a {@link DeleteOutcome} reason and returned, and
+   * the process continues (FR-028).
+   *
+   * IMPORTANT — the revoke is FIRE-AND-FORGET (no server ack; verified vs baileys 7.0.0-rc13,
+   * research.md §8). So `{ ok: true }` means the revoke stanza was **sent**, NOT that WhatsApp
+   * confirmed removal: an out-of-window or unknown-id revoke also returns `{ ok: true }`. The only
+   * `{ ok: false }` path is a transport failure mid-send (`reason: 'network'`) or an encryption /
+   * precondition fault (`reason: 'unknown'`). A successful send also drops the message from the
+   * store (it can no longer be re-sent on a retry-receipt).
+   */
+  async deleteMessage(ref: MessageRef): Promise<DeleteOutcome> {
+    const sock = this.connectedSocket();
+    const storeKey = messageStoreKey(ref.groupId, ref.id);
+    // Prefer the genuine stored key (the documented `{ delete: msg.key }` form); fall back to a
+    // constructed Gateway-sent key when the message is no longer cached this session.
+    const stored = this.messageStore.get(storeKey);
+    const deleteKey: WAMessageKey = stored?.key ?? {
+      remoteJid: ref.groupId,
+      fromMe: true,
+      id: ref.id,
+    };
+    try {
+      await this.sendLimiter.execute(() => sock.sendMessage(ref.groupId, { delete: deleteKey }));
+      // Drop it from the store — it can never be re-sent on a retry-receipt now.
+      this.messageStore.delete(storeKey);
+      this.config.logger.info('WhatsAppGateway: message deleted', {
+        id: ref.id,
+        groupId: ref.groupId,
+      });
+      return { ok: true };
+    } catch (err) {
+      const { reason, detail } = classifyDeleteError(err);
+      this.config.logger.warn('WhatsAppGateway: deleteMessage failed (best-effort, non-fatal)', {
+        id: ref.id,
+        groupId: ref.groupId,
+        reason,
+        detail,
+      });
+      return { ok: false, reason, detail };
+    }
   }
 
   // ── Polls (US3) ─────────────────────────────────────────────────────────────────---
@@ -269,13 +313,9 @@ export class WhatsAppGateway {
    * branch). A single-choice poll is stored as `pollCreationMessageV3`.
    */
   async sendPoll(groupId: string, poll: PollSpec): Promise<PollSendResult> {
-    requireConnected(this.reducerState.status);
-    if (!this.sock) {
-      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
-    }
+    const sock = this.connectedSocket();
     // Validate consumer input that TypeScript cannot enforce (2–12 non-empty options, FR-020).
     validatePollSpec(poll);
-    const sock = this.sock;
     const sent = await this.sendLimiter.execute(() =>
       sock.sendMessage(groupId, {
         poll: { name: poll.question, values: poll.options, selectableCount: 1 },
@@ -325,6 +365,22 @@ export class WhatsAppGateway {
   }
 
   // ── Socket lifecycle (private) ──────────────────────────────────────────────────---
+  /**
+   * Assert the gateway is connected AND return the live socket. Composes the pure
+   * `requireConnected` status guard (actionable error if the caller acted before connecting)
+   * with the socket narrow: `this.sock` is `WASocket | undefined` and `requireConnected` only
+   * sees the status enum, so the compiler can't infer the socket is live from it. The
+   * `!this.sock` branch is an "impossible while connected" invariant guard that also narrows the
+   * return type to a non-undefined `WASocket` for every operation that needs one.
+   */
+  private connectedSocket(): WASocket {
+    requireConnected(this.reducerState.status);
+    if (!this.sock) {
+      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
+    }
+    return this.sock;
+  }
+
   /**
    * Create a fresh socket from the LIVE auth store (C-2: never rebuild the auth store here)
    * and wire its events. Always tears down any previous socket first (M-2: no leak).

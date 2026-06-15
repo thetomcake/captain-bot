@@ -62,6 +62,17 @@ export interface MessageRef {
   groupId: string;
 }
 
+/**
+ * Result of a best-effort revoke (FR-028). `{ ok: true }` means the revoke stanza was **sent**
+ * (Baileys' revoke is fire-and-forget — WhatsApp does not confirm it), not that the message was
+ * provably removed; an out-of-window or unknown-id revoke also yields `{ ok: true }`.
+ *
+ * Of the failure reasons, only `network` (transport drop mid-send) and `unknown` (encryption /
+ * precondition fault) are produced today. `window-expired` and `not-found` are **reserved**: they
+ * are not synchronously detectable because a revoke awaits no server ack, so the server-side
+ * rejection never surfaces as a thrown error (verified vs baileys 7.0.0-rc13 — see
+ * messages/delete-classifier.ts). They remain in the union for contract stability / forward-compat.
+ */
 export type DeleteOutcome =
   | { ok: true }
   | { ok: false; reason: 'window-expired' | 'not-found' | 'network' | 'unknown'; detail?: string };

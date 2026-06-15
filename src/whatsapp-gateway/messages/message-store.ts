@@ -60,6 +60,15 @@ export class MessageStore {
     return this.touch(messageStoreKey(groupId, pollId));
   }
 
+  /**
+   * Return the full cached message (with its `key`) for a composed store key, or `undefined`
+   * on a miss. Used by `deleteMessage` to revoke with the genuine `{ delete: msg.key }`.
+   * Bumps recency on a hit.
+   */
+  get(key: string): WAMessage | undefined {
+    return this.touch(key);
+  }
+
   /** Remove a cached message (e.g. after a successful delete). */
   delete(key: string): void {
     this.entries.delete(key);
