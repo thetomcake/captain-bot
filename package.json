@@ -45,7 +45,6 @@
     "drizzle-orm": "^0.45.2",
     "minimist": "^1.2.8",
     "p-queue": "^9.3.0",
-    "playwright": "^1.60.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0"
   },
