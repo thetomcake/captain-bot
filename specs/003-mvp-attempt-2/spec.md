@@ -1,0 +1,270 @@
+# Feature Specification: MAN v FAT Captain Stats Tool (MVP, Gateway-native)
+
+**Feature Branch**: `003-mvp-attempt-2`
+
+**Created**: 2026-06-15
+
+**Status**: Draft
+
+**Input**: User description: "Swap back to the captain-stats MVP after completing the WhatsApp Gateway (spec 002). Rework the MVP onto the Gateway's tested interface: remove all direct-protocol WhatsApp implementation and replace it with the Gateway. Keep the planned user stories as scope but drop the old low-level detail. Reuse existing fixture/scraping/persistence research."
+
+## Overview
+
+This is the MAN v FAT captain-stats tool: it scrapes a club's fixture list, posts availability polls to a team's WhatsApp group, captures player stats from chat, and stores everything per season for later viewing and correction.
+
+It is a **fresh take on the MVP** (superseding the earlier `001-mvf-captain-stats` attempt) built **on top of the completed WhatsApp Gateway library** (spec 002, `src/whatsapp-gateway/`). The earlier attempt specified and built WhatsApp behaviour against the protocol library (Baileys) directly; that proved fragile, so all low-level WhatsApp complexity now lives behind the Gateway's small, stable, tested interface. This feature consumes **only** that interface and never touches the protocol library.
+
+The work **starts by cutting over**: the MVP's existing direct-protocol WhatsApp code is removed and replaced with placeholders that delegate to the Gateway, so the rest of the MVP (fixtures, scheduling, stat parsing, persistence) builds on a clean integration seam. The fixture/scraping/season/persistence research from the earlier attempt is reused; only the WhatsApp-facing design is reworked.
+
+## Glossary
+
+- **Gateway**: the completed WhatsApp Gateway library (spec 002) — the MVP's single integration point for all WhatsApp behaviour.
+- **Operator / Captain**: the single person running the tool on a server using their own WhatsApp credentials.
+- **Authorized group**: the one WhatsApp group the tool is configured to act on; the Gateway ignores all other chats.
+- **Canonical identity**: the single stable "who" the Gateway resolves for every sender/voter, reconciling WhatsApp's two address forms; the MVP keys all people by it and never double-counts.
+- **Credential snapshot**: the opaque, JSON-serializable session blob the Gateway hands the MVP to persist and supply back, so the session resumes without re-pairing.
+- **Poll keyset**: the per-poll data (decryption secret + options) the Gateway returns from posting a poll; the MVP stores it and supplies it back so later votes can be decrypted.
+
+## Clarifications
+
+### Session 2026-06-15 — Gateway-native MVP (this feature)
+
+These decisions are carried forward as settled; the Gateway (spec 002) now owns all WhatsApp internals.
+
+- Q: How does the MVP reach WhatsApp? → A: **Exclusively** through the Gateway's documented public interface. The MVP MUST NOT import or reference the protocol library (Baileys). The earlier attempt's direct-protocol code is removed and replaced by Gateway usage as the first step.
+- Q: Which concerns are owned by the Gateway and therefore out of scope here? → A: QR pairing/generation (the Gateway surfaces the raw QR *value*), forced re-authentication, connection lifecycle and automatic reconnection/backoff, single-group restriction, group listing, message send/receive, native poll posting, poll-vote decryption and per-voter vote events, JID/LID identity canonicalization, outbound rate-limiting, and best-effort message deletion. The MVP composes these capabilities; it does not specify their internals. **QR *rendering* and credential *storage* are NOT in this list — they belong to the MVP (see below).**
+- Q: How does the MVP persist WhatsApp session credentials (the Gateway owns no storage)? → A: The Gateway returns an **opaque credential snapshot** via a credentials-update callback (and on demand); the MVP persists it in its own database and supplies it back on next start, so no re-authentication is needed. The snapshot's internal format is opaque (Gateway-internal); the MVP treats it as a black box but owns the storage.
+- Q: How are poll votes decrypted? → A: Posting a poll returns a **poll keyset**; the MVP persists it and supplies it back via the Gateway's resolver so later votes decrypt and attribute. The Gateway keeps no durable tally — the MVP aggregates per-voter vote events into the current result.
+- Q: How is each person identified for votes and stats? → A: By the **canonical identity** the Gateway resolves (reconciling JID/LID forms); the MVP keys poll responses and stats by it and never double-counts a person appearing under two address forms.
+
+### Session 2026-06-15 — QR rendering & session storage are MVP-owned
+
+- Q: Are QR rendering and session-credential storage owned by the MVP or the Gateway? → A: The **MVP**. The Gateway only surfaces the raw QR *value* (via its QR subscription) and the opaque credential snapshot; the MVP renders the QR and persists credentials in its own database. (Corrects an earlier statement that wrongly listed "QR rendering" and "session-storage mechanics" as Gateway-owned / out of scope.)
+- Q: How should the MVP render the QR value surfaced by the Gateway? → A: Render **both** a scannable terminal QR code **and** a saved QR image file (so the operator can scan from the terminal or open the image), printing the image file's path.
+
+### Session 2026-06-15 — Scraping, test DB, and current-code trust
+
+- Q: Is dynamic/headless-browser scraping (Playwright) an option for this MVP? → A: **No.** The MVP relies **only** on static HTML parsing (Axios + Cheerio); dynamic scraping was removed as too complex and is excluded entirely (not deferred).
+- Q: Must the test database be in-memory, or is an on-disk test file acceptable? → A: **In-memory only**, for speed (an on-disk test file is not used).
+- Q: What is the current trust level of the existing MVP code? → A: The MVP is in a **broken state**; **no existing code is trusted** to work as expected. Every user story must be independently re-verified against its acceptance scenarios before being considered done.
+- Q: Are any user stories already implemented? → A: Possibly. Some (e.g., **View Team Fixtures**) appear to work and may need only **review + technical migration**; others may need rework/rebuild. The split is decided during planning, with no existing implementation assumed correct.
+
+### Carried-forward MVP decisions (settled in the earlier attempt; unchanged)
+
+- WhatsApp authentication: QR-code pairing on first run, session resumed thereafter (QR is surfaced by the Gateway; the MVP displays it and persists the credential snapshot).
+- Node.js runtime: Node.js 22.x (Current).
+- Season transition: a new season is created when all previously scraped fixture dates disappear from the club website.
+- Fixture update frequency: daily checks at 6 AM UK time + a manual refresh command.
+- Stat parsing: confidence scoring (0–100%) with a 70% capture threshold.
+- Group discovery: a `captain-stats connect` command connects via the Gateway, lists the groups the account belongs to (name + identifier), and prints each identifier so the operator can set `AUTHORIZED_GROUP_ID` in `.env` (printed to console only; not persisted automatically).
+- Poll replacement: replacing a poll (via `poll --force` or rescheduled-fixture detection) hard-deletes the old poll and cascade-deletes its responses; best-effort WhatsApp message deletion is requested via the Gateway and never blocks the replacement.
+- Scraping: **static HTML parsing (Axios + Cheerio) only** — dynamic/headless-browser scraping (e.g., Playwright) is **excluded from this MVP entirely** (removed in the earlier attempt as too complex), not merely deferred. On club-website unavailability during the 6 AM check, skip and retry at the next scheduled check 24 hours later.
+- Deployment: single-server, single operator using the operator's WhatsApp credentials; "captain" = the operator/admin.
+- Logging: verbose, timestamped, for a full audit trail (polls posted, messages processed, fixtures checked, connection-state changes, errors).
+- Stat overrides within the 3-day window: later messages override earlier ones; edits/deletes are ignored. Partial messages accepted; no verification or conflict detection across players.
+- Test isolation: a real **in-memory** database (NOT an on-disk test file) for speed, with external dependencies mocked **only at their service boundaries** — a fake fixture scraper and a fake Gateway — never by mocking library internals.
+- CI test-suite target: under 10 seconds.
+
+## User Scenarios & Testing *(mandatory)*
+
+> **Foundational cutover (precedes the user stories):** before delivering user-facing value, the MVP's existing direct-protocol WhatsApp implementation is removed and replaced with a thin seam over the Gateway (per FR-006). This is technical migration work, not a user story, but it is the first thing done so every story below builds on the Gateway seam.
+>
+> The five user stories are the planned scope. WhatsApp-facing stories are expressed in terms of the **capabilities the Gateway provides** (connect, list groups, send message, receive message, send poll, read votes, delete message); the MVP composes those with its own domain logic (fixtures, scheduling, stat parsing, persistence) and never specifies how WhatsApp itself is driven.
+>
+> **Current implementation status (read before planning):** the MVP is presently in a **broken state**, and **no existing code is trusted to work as expected** — each user story's acceptance scenarios MUST be independently re-verified against the Gateway-clean codebase before that story is considered done. Some stories may already be partially or fully implemented in the existing code: for example, **View Team Fixtures (US1) appears to work** and is expected to need only **review + technical migration** (re-verification, plus decoupling from any removed direct-protocol code), whereas others may need substantial rework or rebuild. The per-story split between "review + migrate" and "rebuild" is determined during `/speckit-plan` by assessing the existing code against each story's acceptance scenarios; this spec does not assume any existing implementation is correct.
+
+### User Story 1 - View Team Fixtures (Priority: P1)
+
+As a team captain, I need to see my team's upcoming fixtures so I can plan ahead and know when to post availability polls.
+
+**Why this priority**: Foundational — without fixture information, no other functionality (polls, stats) can work. It is the entry point for everything else and has no WhatsApp dependency.
+
+**Independent Test**: Provide a club URL and team identifier, then verify all fixtures are retrieved with correct date, time, opponent, and venue and ordered chronologically.
+
+**Acceptance Scenarios**:
+
+1. **Given** I provide my club URL (e.g., `manvfatfootball.com/club/watford/`) and team identifier, **When** the system fetches fixtures, **Then** I see all upcoming games with date, time, opponent, and venue.
+2. **Given** fixtures exist on the club website, **When** I view the fixture list, **Then** I see them ordered chronologically.
+3. **Given** fixtures have been updated on the club website, **When** the system rechecks, **Then** I see the updated information reflected.
+
+---
+
+### User Story 2 - Post Availability Polls (Priority: P2)
+
+As a team captain, I need availability polls posted to the team's WhatsApp group automatically after each game so I can gauge who's available for the next fixture without manual coordination.
+
+**Why this priority**: Automates a repetitive post-game captain task. Depends on fixture data (P1) and on the Gateway's send-poll / read-votes capabilities, but is independently valuable.
+
+**Independent Test**: Simulate a completed game and verify a poll is posted (via the Gateway) to the authorized group the next day with the correct fixture details; cast votes and verify each is recorded against the correct person and the running tally matches.
+
+**Acceptance Scenarios**:
+
+1. **Given** a game was played on Monday, **When** Tuesday arrives, **Then** an availability poll for the next fixture is posted to the authorized WhatsApp group.
+2. **Given** a poll has been posted, **When** players vote, **Then** each response is recorded against the voter's canonical identity and the running tally reflects vote changes and withdrawals.
+3. **Given** multiple fixtures exist, **When** a poll is posted, **Then** it references the correct next fixture.
+
+---
+
+### User Story 3 - Capture Player Stats from Chat (Priority: P3)
+
+As a team captain, I need player stats (goals, assists, weight direction, food tracking) captured automatically from WhatsApp messages in the 3 days after a game so I don't have to track and enter them manually.
+
+**Why this priority**: Provides automation value but is less critical than fixtures and availability. Players can still report manually if needed. Depends on the Gateway's receive-message capability.
+
+**Independent Test**: Send test messages with various stat formats during the 3-day window after a game (delivered to the MVP via the Gateway's message notifications) and verify correct capture and attribution to the sending player's canonical identity.
+
+**Acceptance Scenarios**:
+
+1. **Given** a game was played and it's within 3 days, **When** a player messages "2 goals, 1 assist, weight down, tracked food", **Then** stats are captured: goals=2, assists=1, weight=down, tracking=yes.
+2. **Given** a player messages "scored today" within 3 days of a game, **When** the system processes the message, **Then** 1 goal is attributed to that player for that game.
+3. **Given** it's been 4 days since the last game, **When** a player mentions goals, **Then** the message is treated as regular chat and not captured as stats.
+4. **Given** a player sends general chat like "great game everyone", **When** the system processes it, **Then** no stats are captured (conservative approach).
+5. **Given** a player doesn't mention a stat component, **When** the system processes their first message, **Then** defaults are applied: goals=0, assists=0, weight=unknown, tracking=no.
+
+---
+
+### User Story 4 - View and Correct Historical Stats (Priority: P4)
+
+As a team captain, I need to view stats for any game this season or from previous seasons and correct any errors so I maintain accurate records over time.
+
+**Why this priority**: Important for data integrity but less urgent than core automation. No WhatsApp dependency.
+
+**Independent Test**: View stored stats, make corrections, and verify persistence across sessions and seasons.
+
+**Acceptance Scenarios**:
+
+1. **Given** stats have been captured for a game, **When** I view that game's stats, **Then** I see all captured data organized by player.
+2. **Given** I notice an error in captured stats, **When** I edit the values, **Then** the corrected stats are saved.
+3. **Given** multiple seasons exist, **When** I select a previous season, **Then** I can view all games and stats from that season.
+
+---
+
+### User Story 5 - Season Transition (Priority: P5)
+
+As a team captain, I need the system to recognize automatically when a new season starts so historical data is preserved and new data doesn't overwrite previous seasons.
+
+**Why this priority**: Critical for long-term data integrity but only exercised at season boundaries. No WhatsApp dependency.
+
+**Independent Test**: Simulate a season-end scenario where the last fixture completes and new fixtures appear, verifying a new season is created while the old one is preserved.
+
+**Acceptance Scenarios**:
+
+1. **Given** the last game of a season has been played and new fixtures appear, **When** the system detects the change, **Then** a new season is created and previous season data remains intact.
+2. **Given** multiple seasons exist, **When** I view historical data, **Then** I can distinguish between seasons and access data from any season.
+
+---
+
+### Edge Cases
+
+- When the club website is unavailable during the daily 6 AM check, the system skips the check and retries 24 hours later (the operator can trigger a manual refresh if urgent).
+- When a fixture is rescheduled after a poll has been posted, the system replaces the poll: it hard-deletes the old poll and its responses from the database, requests best-effort deletion of the old poll message through the Gateway, and posts a new poll with updated fixture details (per FR-026/FR-027).
+- When the Gateway reports that the old poll message could not be deleted (window expired, message already gone, or network failure), the MVP logs a warning with a timestamp and proceeds with the database deletion and new poll; WhatsApp message deletion is best-effort and never blocks the replacement.
+- When a player edits or deletes a WhatsApp message containing stats, the edit/delete is ignored; players can send a new message within the 3-day window to override their previous stats.
+- For ambiguous stat messages ("think I got 2", "maybe assisted"), confidence scoring below the 70% threshold results in no capture (FR-018).
+- When multiple players each claim goals for the same game, all claims are accepted without verification; the captain reviews and corrects totals manually via FR-024 if needed.
+- Players who leave the team mid-season remain in historical stats; no special handling is needed for the MVP (stats are per-game snapshots).
+- When the WhatsApp connection drops, the Gateway automatically reconnects on recoverable disconnects and surfaces a terminal state on non-recoverable ones; the MVP logs connection-state changes but takes no reconnection action itself.
+- Before running `captain-stats daemon`, the operator MUST first run `captain-stats connect` to authenticate (scan the QR the MVP renders — in the terminal or from the saved image file — from the Gateway's surfaced QR value), identify the target group from the listed groups, and set `AUTHORIZED_GROUP_ID=<id>` in `.env`; the daemon exits with a clear error if `AUTHORIZED_GROUP_ID` is not configured.
+- A poll vote whose keyset the MVP cannot supply (unknown/expired/replaced poll) is skipped by the Gateway without error; the MVP simply records no response for it.
+- Timezone handling defaults to UK time, sufficient for the UK-based MAN v FAT Football.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+#### Gateway cutover (foundational)
+
+- **FR-006**: The MVP MUST perform **all** WhatsApp interactions exclusively through the WhatsApp Gateway library's documented public interface, and MUST NOT import, reference, or otherwise depend on the underlying protocol library (Baileys) directly. As the first work item, the earlier attempt's direct-protocol WhatsApp implementation MUST be removed and replaced with a thin seam that delegates to the Gateway.
+
+#### Fixtures & seasons
+
+- **FR-001**: System MUST support any MAN v FAT club identified by its club page URL on `manvfatfootball.com` (e.g., `manvfatfootball.com/club/watford/`) and the captain's team within that club.
+- **FR-002**: System MUST retrieve team fixtures from the club page including date, time, opponent, and venue.
+- **FR-003**: System MUST automatically recheck fixtures daily at 6 AM UK time and reflect changes; the captain MUST be able to trigger a manual refresh on demand.
+- **FR-004**: System MUST retain historic data across multiple seasons.
+- **FR-005**: System MUST detect season transitions when previously scraped fixtures are no longer present on the club website, automatically creating a new season while preserving previous season data.
+
+#### WhatsApp integration (via the Gateway library — spec 002)
+
+- **FR-007**: System MUST authenticate with WhatsApp through the Gateway on first run by taking the raw QR value the Gateway surfaces (via its QR subscription) and **rendering it itself** — both as a scannable terminal QR code and as a saved QR image file whose path it prints — so the operator can pair by scanning either. On subsequent runs it MUST resume the session without a fresh scan. (QR *pairing/generation* and reconnection internals are owned by the Gateway; QR *rendering* is the MVP's responsibility.)
+- **FR-008**: System MUST persist the opaque session-credential snapshot the Gateway provides (via the Gateway's credentials-update callback and on shutdown) in its own database, and supply it back to the Gateway on next start so re-authentication is not required.
+- **FR-009**: System MUST configure the Gateway with exactly one explicitly-authorized WhatsApp group and rely on the Gateway to ignore all other chats; the system MUST NOT itself process activity from any other chat.
+- **FR-010**: System MUST observe the Gateway's connection lifecycle (connecting / connected / closed / terminal) and log each state change with a timestamp; automatic reconnection on recoverable disconnects is performed by the Gateway, so the system MUST NOT implement its own reconnection or backoff.
+- **FR-011**: System MUST provide a `captain-stats connect` command that connects through the Gateway, lists every group the account belongs to (display name + stable identifier) using the Gateway's group-listing operation, and prints each identifier to the console so the operator can set `AUTHORIZED_GROUP_ID` in `.env`. No identifier is persisted automatically.
+
+#### Availability polls
+
+- **FR-012**: System MUST post an availability poll for the next fixture on the day after each game (e.g., Monday game → Tuesday poll) by calling the Gateway's send-poll capability, and MUST persist the **poll keyset** the Gateway returns so later votes can be decrypted and attributed.
+- **FR-013**: System MUST record each poll response against the voter's canonical identity as provided by the Gateway's per-voter vote events, aggregating those events into the current tally by applying each as a replace-by-voter update (a vote change replaces the prior selection; a withdrawal clears it). The system MUST NOT double-count a person who appears under two address forms.
+- **FR-014**: When the Gateway requests a poll's keyset to decrypt a vote, the system MUST supply the stored keyset for that poll; if the system has no keyset for the poll (e.g., unknown or replaced), it MUST allow the Gateway to skip that vote without error.
+
+#### Stat capture
+
+- **FR-015**: System MUST interpret natural-language messages (delivered via the Gateway's incoming-message notifications) to capture per-player stats: goals, assists, weight direction (`up`/`down`/`same`/`unknown`), and food tracking (`yes`/`no`).
+- **FR-016**: System MUST handle various natural-language expressions for goals and assists (e.g., "scored", "2 goals", "got one", "assisted").
+- **FR-017**: System MUST attempt stat capture only during the 3-day window following a game; messages outside this window are treated as ordinary chat.
+- **FR-018**: System MUST be conservative in stat capture, using confidence scoring (0–100%) and only capturing stats when confidence exceeds 70%, and MUST NOT over-interpret general chat.
+- **FR-019**: System MUST attribute captured stats to the canonical identity of the player who sent the message, linked to the relevant game; it MUST accept partial messages and update only the specific fields mentioned (e.g., "2 goals" in one message, "1 assist" in another). Multiple messages from the same player within the 3-day window merge/update their stats for that game; message edits/deletes are ignored.
+- **FR-020**: System MUST apply defaults only for the initial stat capture when values are not explicitly stated: goals=0, assists=0, weight=unknown, tracking=no; subsequent partial messages update only the fields mentioned without resetting other fields.
+- **FR-021**: System MUST capture weight as direction only (`up`/`down`/`same`/`unknown`) and MUST NOT capture weight values, BMI, or other health data.
+
+#### Storage, viewing & correction
+
+- **FR-022**: System MUST store captured stats and poll responses in a database, retained per season.
+- **FR-023**: Captain MUST be able to view recorded stats for any game in the current or previous seasons.
+- **FR-024**: Captain MUST be able to correct recorded stats, including for past seasons.
+- **FR-025**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, connection-state changes, errors) to provide a full audit trail for debugging and monitoring.
+
+#### Poll replacement
+
+- **FR-026**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, then replace the existing poll using the same hard-delete-and-replace process defined in FR-027.
+- **FR-027**: When a poll is replaced — whether triggered manually via `poll --force` or automatically via FR-026 reschedule detection — the system MUST hard-delete the previous poll record and cascade-delete all poll responses belonging to it (no orphaned responses, no soft-delete/superseded marker). The system MUST then request deletion of the previous poll message through the Gateway's best-effort delete capability; if the Gateway reports the deletion failed (window passed, message already gone, network failure), the system MUST log a warning with a timestamp and continue with the database deletion and new poll rather than blocking, retrying, or aborting.
+
+### Key Entities
+
+- **Club/Team**: The MAN v FAT club (identified by its `manvfatfootball.com` page URL) and the specific team the captain manages within that club.
+- **Season**: A numbered season representing a distinct competition period; historic seasons are retained indefinitely.
+- **Game**: A fixture for the team including date, time, opponent, venue, and link to the season.
+- **WhatsApp Credentials**: The opaque session-credential snapshot returned by the Gateway and persisted by the MVP so the WhatsApp session resumes without re-pairing.
+- **Player Identity**: The canonical identity (provided by the Gateway, reconciling JID/LID address forms) used to attribute poll responses and stats to one person.
+- **Poll**: An availability poll posted for a specific fixture; at most one active poll exists per fixture. The MVP stores the poll record together with the **poll keyset** the Gateway returns. Replacing a poll hard-deletes the prior record rather than retaining a superseded copy.
+- **Poll Response**: A voter's current selection for a specific poll, keyed by canonical identity; responses are owned by their poll and cascade-deleted when that poll is deleted (no orphaned responses).
+- **Stat Record**: Per player identity, per game: goals (integer), assists (integer), weight direction (`up`/`down`/`same`/`unknown`), food tracking (`yes`/`no`).
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: Captain can view all team fixtures for the current season within 5 seconds of requesting them.
+- **SC-002**: Availability polls are posted to WhatsApp within 1 hour of the scheduled post time (the day after each game).
+- **SC-003**: 80% of clear stat messages (confidence >70%) are correctly captured during the 3-day window.
+- **SC-004**: False-positive rate for stat capture is below 5% (confidence scoring prevents casual-chat misinterpretation).
+- **SC-005**: Captain can view and correct stats for any game in under 30 seconds.
+- **SC-006**: Season transitions are detected automatically when old fixtures disappear from the club website, with 100% accuracy (no data loss or cross-season contamination).
+- **SC-007**: System maintains 99.9% data integrity across multiple seasons (no loss of historical stats or poll responses).
+- **SC-008**: Poll-response capture rate is 100% (every vote the Gateway emits is recorded against the correct person, with no double-counting across address forms).
+- **SC-009**: System reduces the captain's manual stat-tracking time by at least 70% compared to manual spreadsheet entry.
+- **SC-010**: Full test suite completes in under 10 seconds to enable rapid TDD cycles and fast CI/CD feedback.
+- **SC-011**: No MVP source file imports or references the underlying WhatsApp protocol library; all WhatsApp behaviour is reached only through the Gateway's public interface (verifiable by inspection / a guard test).
+
+## Assumptions
+
+- The MAN v FAT Football website structure remains consistent enough to scrape fixture information reliably with static HTML parsing (no JavaScript rendering required). Dynamic/headless-browser scraping (e.g., Playwright) is **excluded from this MVP entirely** — it was removed in the earlier attempt as too complex; the MVP relies only on static parsing (Axios + Cheerio).
+- The WhatsApp Gateway library (spec 002, `src/whatsapp-gateway/`) is complete, tested, and available to the MVP as the single integration point for all WhatsApp behaviour. The MVP depends on the Gateway's public interface (connect / force re-auth / list groups / send & receive messages / send poll / read votes / delete message, plus credential-snapshot and poll-keyset callbacks and canonical identities) exactly as documented in its interface contract.
+- Concerns owned by the Gateway and therefore **out of scope for this spec**: QR pairing/generation (the Gateway surfaces the raw QR value only), forced re-authentication, connection lifecycle and reconnection/backoff, single-group restriction, group listing, poll-vote decryption, JID/LID identity canonicalization, outbound rate-limiting, and best-effort deletion semantics. **Owned by the MVP (in scope):** rendering the surfaced QR value (terminal + image file) and persisting the opaque credential snapshot in the MVP database.
+- The Gateway's QR subscription surfaces the raw QR *value* to the consumer; if the Gateway library currently also prints the QR to its own console, that is a Gateway-side detail the MVP does not rely on — the MVP renders from the surfaced value. (Any such console output in the Gateway is tracked separately under spec 002, not here.)
+- The fixture/scraping, season-transition, persistence, stat-parsing, and CLI research and design from the earlier MVP attempt (`001-mvf-captain-stats`) are reused as the baseline for the non-WhatsApp domain; only the WhatsApp-facing design is reworked onto the Gateway.
+- The tool runs on a server as a single deployment instance using the operator's (captain's) WhatsApp credentials; the operator has physical access to their phone for the initial QR scan.
+- Players use the authorized WhatsApp group for team communication and stat reporting; the team plays a regular weekly schedule with predictable fixture patterns.
+- Internet connectivity is generally available for periodic fixture checks and WhatsApp monitoring.
+- The captain is authorized to monitor the WhatsApp group and collect player stats (no consent mechanism needed for this personal project).
+- Weight direction data is sufficient; actual weight values or BMI are not needed.
+- Stat-capture accuracy of 80% is acceptable given the conservative approach (70% confidence threshold) and manual correction capability; natural-language processing can distinguish stat reports from casual chat with reasonable accuracy using confidence scoring.
+- Fixture data on the club website is accurate and updated by the league administrators; daily 6 AM UK checks are sufficient, with manual refresh for urgent reschedules.
+- The 3-day post-game window is sufficient for players to report stats; posting on the day after a game aligns with typical team coordination timelines.
+- Database storage can scale to multiple seasons for a single team (estimated: 20–30 games/season, 10–15 players/team, 5+ seasons).
+- Initial WhatsApp setup requires a one-time `captain-stats connect` run to authenticate (QR scan) and identify the target group; the operator sets `AUTHORIZED_GROUP_ID` in `.env` before starting the daemon. The `connect` command and the daemon share the same persisted Gateway credential snapshot, so no duplicate QR scan is needed on first daemon start.
+- Timezone handling defaults to UK time since MAN v FAT Football is UK-based.
+- Tests use a real **in-memory** database (not an on-disk test file) for accurate behaviour validation at speed; external dependencies are mocked at their **service boundaries only** — a fake fixture scraper and a fake WhatsApp Gateway (both implementing the same interfaces the production code uses). No mocking of library internals (axios, cheerio, or the protocol library) appears anywhere in the test suite. Interactive WhatsApp paths (QR pairing, live votes) are validated through the Gateway's own manual entry points, not this suite.
+- Retry with exponential backoff for the fixture scraper remains a shared MVP utility; WhatsApp rate-limiting and reconnection are owned by the Gateway and are no longer MVP concerns.
+- Removing the earlier attempt's direct-protocol WhatsApp implementation and cutting the MVP over to the Gateway is the **foundational, in-scope first step** of this feature (it was deliberately deferred out of spec 002). The earlier `001-mvf-captain-stats` spec is superseded by this feature.
