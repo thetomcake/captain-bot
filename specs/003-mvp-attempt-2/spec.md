@@ -10,7 +10,7 @@
 
 ## Overview
 
-This is the MAN v FAT captain-stats tool: it scrapes a club's fixture list, posts availability polls to a team's WhatsApp group, captures player stats from chat, and stores everything per season for later viewing and correction.
+This is the MAN v FAT captain-stats tool: it scrapes a club's fixture list, posts availability polls to a team's WhatsApp group, captures player stats from chat, and stores everything per season for later viewing.
 
 It is a **fresh take on the MVP** (superseding the earlier `001-mvf-captain-stats` attempt) built **on top of the completed WhatsApp Gateway library** (spec 002, `src/whatsapp-gateway/`). The earlier attempt specified and built WhatsApp behaviour against the protocol library (Baileys) directly; that proved fragile, so all low-level WhatsApp complexity now lives behind the Gateway's small, stable, tested interface. This feature consumes **only** that interface and never touches the protocol library.
 
@@ -49,16 +49,26 @@ These decisions are carried forward as settled; the Gateway (spec 002) now owns 
 - Q: What is the current trust level of the existing MVP code? → A: The MVP is in a **broken state**; **no existing code is trusted** to work as expected. Every user story must be independently re-verified against its acceptance scenarios before being considered done.
 - Q: Are any user stories already implemented? → A: Possibly. Some (e.g., **View Team Fixtures**) appear to work and may need only **review + technical migration**; others may need rework/rebuild. The split is decided during planning, with no existing implementation assumed correct.
 
+### Session 2026-06-15 — `!postpoll` chat trigger & on-demand fetching (simplification)
+
+This session replaces automatic poll scheduling and automatic unconfirmed-fixture/reschedule handling with a single manual, in-chat trigger, and makes all fixture fetching on-demand. It supersedes the earlier "Cron B post-game poll", automatic reschedule detection (old FR-026), the automatic unconfirmed-fixture guard (old FR-028), the daily 06:00 fixture cron (old FR-003 wording), and SC-002.
+
+- Q: Who may trigger a poll by sending the trigger in the group? → A: **Anyone** in the authorized group (accepted trade-off: a re-trigger force-replaces the poll and cascade-deletes its existing votes, and any member can do this — see FR-029 caveat).
+- Q: What text fires the trigger? → A: A **distinct command token `!postpoll`**, matched as the **whole message** case-insensitively after trimming whitespace (not natural words like "post poll", to avoid false positives). It is handled **before** stat extraction, so it is never captured as a stat.
+- Q: What in-chat feedback does the trigger give? → A: **Silent on success** (the posted poll is its own confirmation); the bot replies in-chat **only on problems** — no confirmed next fixture, or a fixture-fetch failure. All outcomes are logged.
+- Q: What happens to the automatic poll machinery? → A: **Removed.** `!postpoll` (chat) and the `poll`/`poll --force` CLI command (admin escape hatch) are the only posting paths. Drop the post-game poll cron, automatic reschedule-driven replacement, the automatic unconfirmed-fixture guard, and SC-002.
+- Q: Does fixture fetching stay scheduled? → A: **No — fully on-demand.** There is no daily fixture cron. Fixtures are re-fetched only when `!postpoll` fires, when `sync` runs, and when `fixtures` runs; season-transition detection (FR-005) runs during those fetches.
+
 ### Carried-forward MVP decisions (settled in the earlier attempt; unchanged)
 
 - WhatsApp authentication: QR-code pairing on first run, session resumed thereafter (QR is surfaced by the Gateway; the MVP displays it and persists the credential snapshot).
 - Node.js runtime: Node.js 22.x (Current).
 - Season transition: a new season is created when all previously scraped fixture dates disappear from the club website.
-- Fixture update frequency: daily checks at 6 AM UK time + a manual refresh command.
+- Fixture update frequency: **on-demand only** — fixtures are re-fetched when `!postpoll` fires, when `sync` runs, and when `fixtures` runs. There is no scheduled daily check (the former 6 AM cron is removed).
 - Stat parsing: confidence scoring (0–100%) with a 70% capture threshold.
 - Group discovery: a `captain-stats connect` command connects via the Gateway, lists the groups the account belongs to (name + identifier), and prints each identifier so the operator can set `AUTHORIZED_GROUP_ID` in `.env` (printed to console only; not persisted automatically).
-- Poll replacement: replacing a poll (via `poll --force` or rescheduled-fixture detection) hard-deletes the old poll and cascade-deletes its responses; best-effort WhatsApp message deletion is requested via the Gateway and never blocks the replacement.
-- Scraping: **static HTML parsing (Axios + Cheerio) only** — dynamic/headless-browser scraping (e.g., Playwright) is **excluded from this MVP entirely** (removed in the earlier attempt as too complex), not merely deferred. On club-website unavailability during the 6 AM check, skip and retry at the next scheduled check 24 hours later.
+- Poll replacement: replacing a poll (by re-sending `!postpoll`, or via the `poll --force` CLI) hard-deletes the old poll and cascade-deletes its responses; best-effort WhatsApp message deletion is requested via the Gateway and never blocks the replacement. There is no automatic reschedule-driven replacement — a human re-triggers when a fixture changes.
+- Scraping: **static HTML parsing (Axios + Cheerio) only** — dynamic/headless-browser scraping (e.g., Playwright) is **excluded from this MVP entirely** (removed in the earlier attempt as too complex), not merely deferred. When the club website is unavailable during an on-demand fetch (e.g. an `!postpoll` trigger), the system posts no poll, replies in-chat that the fetch failed, logs it, and waits for the next manual trigger/`sync`.
 - Deployment: single-server, single operator using the operator's WhatsApp credentials; "captain" = the operator/admin.
 - Logging: verbose, timestamped, for a full audit trail (polls posted, messages processed, fixtures checked, connection-state changes, errors).
 - Stat overrides within the 3-day window: later messages override earlier ones; edits/deletes are ignored. Partial messages accepted; no verification or conflict detection across players.
@@ -91,17 +101,19 @@ As a team captain, I need to see my team's upcoming fixtures so I can plan ahead
 
 ### User Story 2 - Post Availability Polls (Priority: P2)
 
-As a team captain, I need availability polls posted to the team's WhatsApp group automatically after each game so I can gauge who's available for the next fixture without manual coordination.
+As a team member, I need to post an availability poll for the next fixture to the WhatsApp group by sending `!postpoll` in the group, so the team can gauge who's available without anyone needing server/CLI access.
 
-**Why this priority**: Automates a repetitive post-game captain task. Depends on fixture data (P1) and on the Gateway's send-poll / read-votes capabilities, but is independently valuable.
+**Why this priority**: Replaces a repetitive post-game captain task with a one-word in-chat command. Depends on fixture data (P1) and on the Gateway's send-poll / read-votes capabilities, but is independently valuable. The manual trigger removes the need to auto-schedule posts or auto-handle unconfirmed/rescheduled fixtures.
 
-**Independent Test**: Simulate a completed game and verify a poll is posted (via the Gateway) to the authorized group the next day with the correct fixture details; cast votes and verify each is recorded against the correct person and the running tally matches.
+**Independent Test**: Via `FakeGateway`, simulate an `!postpoll` message in the authorized group; verify the system re-fetches fixtures and posts a poll for the correct next fixture (and, when no fixture is confirmed or the fetch fails, posts no poll and replies in-chat). Cast votes and verify each is recorded against the correct person and the running tally matches; re-send `!postpoll` and verify the old poll + votes are replaced.
 
 **Acceptance Scenarios**:
 
-1. **Given** a game was played on Monday, **When** Tuesday arrives, **Then** an availability poll for the next fixture is posted to the authorized WhatsApp group.
+1. **Given** the next fixture is confirmed, **When** any group member sends `!postpoll`, **Then** the system re-fetches fixtures and posts an availability poll for the next fixture to the authorized WhatsApp group (no reply on success).
 2. **Given** a poll has been posted, **When** players vote, **Then** each response is recorded against the voter's canonical identity and the running tally reflects vote changes and withdrawals.
-3. **Given** multiple fixtures exist, **When** a poll is posted, **Then** it references the correct next fixture.
+3. **Given** multiple fixtures exist, **When** `!postpoll` is sent, **Then** the poll references the correct next fixture.
+4. **Given** a poll already exists for that fixture slot, **When** `!postpoll` is sent again (or `poll --force` is run), **Then** the existing poll and all its recorded votes are hard-deleted and a fresh poll is posted (FR-027).
+5. **Given** no next fixture is confirmed (or the club site is unreachable), **When** `!postpoll` is sent, **Then** no poll is posted and the bot replies in-chat explaining why (FR-028).
 
 ---
 
@@ -123,19 +135,20 @@ As a team captain, I need player stats (goals, assists, weight direction, food t
 
 ---
 
-### User Story 4 - View and Correct Historical Stats (Priority: P4)
+### User Story 4 - View Historical Stats (Priority: P4)
 
-As a team captain, I need to view stats for any game this season or from previous seasons and correct any errors so I maintain accurate records over time.
+As a team captain, I need to view stats for any game this season or from previous seasons so I can review accurate records over time.
 
 **Why this priority**: Important for data integrity but less urgent than core automation. No WhatsApp dependency.
 
-**Independent Test**: View stored stats, make corrections, and verify persistence across sessions and seasons.
+> **Correction is player-driven, not captain-driven.** There is no captain-side stat-editing command in this MVP. Stored stats are corrected only by the player sending a further message within the 3-day window (a field-level override per FR-019) — e.g. after "2 goals, 2 assists", a later "correction 1 goal" sets goals=1 and leaves assists=2 unchanged. `stats` is therefore **view-only**.
+
+**Independent Test**: View stored stats and verify persistence across sessions and seasons.
 
 **Acceptance Scenarios**:
 
 1. **Given** stats have been captured for a game, **When** I view that game's stats, **Then** I see all captured data organized by player.
-2. **Given** I notice an error in captured stats, **When** I edit the values, **Then** the corrected stats are saved.
-3. **Given** multiple seasons exist, **When** I select a previous season, **Then** I can view all games and stats from that season.
+2. **Given** multiple seasons exist, **When** I select a previous season, **Then** I can view all games and stats from that season.
 
 ---
 
@@ -156,12 +169,15 @@ As a team captain, I need the system to recognize automatically when a new seaso
 
 ### Edge Cases
 
-- When the club website is unavailable during the daily 6 AM check, the system skips the check and retries 24 hours later (the operator can trigger a manual refresh if urgent).
-- When a fixture is rescheduled after a poll has been posted, the system replaces the poll: it hard-deletes the old poll and its responses from the database, requests best-effort deletion of the old poll message through the Gateway, and posts a new poll with updated fixture details (per FR-026/FR-027).
+- When the club website is unavailable during an on-demand fetch triggered by `!postpoll`, the system posts no poll, replies in-chat that the club site couldn't be reached, logs it, and waits for the next manual trigger/`sync` (FR-028). There is no scheduled retry.
+- When a fixture is rescheduled, a human re-sends `!postpoll` (or runs `poll --force`); the system re-fetches fixtures and replaces the poll — hard-deleting the old poll and its responses, requesting best-effort deletion of the old poll message via the Gateway, and posting a new poll with updated details (FR-026/FR-027). The system does not auto-detect reschedules.
+- When `!postpoll` is sent but the next fixture is not yet confirmed — the club website shows a "Fixtures to be confirmed" placeholder rather than a concrete date/time/opponent — the system posts **no** poll and replies in-chat that there is no confirmed next fixture; the sender re-triggers once details appear (FR-028). (The scraper skips "Fixtures to be confirmed" rows, so an unconfirmed slot yields no postable next fixture; the test HTML fixture `tests/fixtures/html/manvfat-fixtures.html` contains such placeholder rows.)
+- Because **any** group member can send `!postpoll`, a member can accidentally or deliberately re-trigger a replacement that hard-deletes an existing poll and all its recorded votes; this is an accepted trade-off for MVP simplicity (FR-029) — there is no per-member authorization on the trigger.
+- A group message that merely mentions the words "post poll" in normal conversation does NOT trigger anything; only a whole message equal to `!postpoll` (case-insensitive, trimmed) is treated as the command (FR-029).
 - When the Gateway reports that the old poll message could not be deleted (window expired, message already gone, or network failure), the MVP logs a warning with a timestamp and proceeds with the database deletion and new poll; WhatsApp message deletion is best-effort and never blocks the replacement.
 - When a player edits or deletes a WhatsApp message containing stats, the edit/delete is ignored; players can send a new message within the 3-day window to override their previous stats.
 - For ambiguous stat messages ("think I got 2", "maybe assisted"), confidence scoring below the 70% threshold results in no capture (FR-018).
-- When multiple players each claim goals for the same game, all claims are accepted without verification; the captain reviews and corrects totals manually via FR-024 if needed.
+- When multiple players each claim goals for the same game, all claims are accepted without verification; there is no captain-side correction (FR-024) — a player who over/under-reported corrects their own totals by sending a follow-up message within the 3-day window (field-level override, FR-019).
 - Players who leave the team mid-season remain in historical stats; no special handling is needed for the MVP (stats are per-game snapshots).
 - When the WhatsApp connection drops, the Gateway automatically reconnects on recoverable disconnects and surfaces a terminal state on non-recoverable ones; the MVP logs connection-state changes but takes no reconnection action itself.
 - Before running `captain-stats daemon`, the operator MUST first run `captain-stats connect` to authenticate (scan the QR the MVP renders — in the terminal or from the saved image file — from the Gateway's surfaced QR value), identify the target group from the listed groups, and set `AUTHORIZED_GROUP_ID=<id>` in `.env`; the daemon exits with a clear error if `AUTHORIZED_GROUP_ID` is not configured.
@@ -180,9 +196,9 @@ As a team captain, I need the system to recognize automatically when a new seaso
 
 - **FR-001**: System MUST support any MAN v FAT club identified by its club page URL on `manvfatfootball.com` (e.g., `manvfatfootball.com/club/watford/`) and the captain's team within that club.
 - **FR-002**: System MUST retrieve team fixtures from the club page including date, time, opponent, and venue.
-- **FR-003**: System MUST automatically recheck fixtures daily at 6 AM UK time and reflect changes; the captain MUST be able to trigger a manual refresh on demand.
+- **FR-003**: System MUST re-fetch fixtures **on demand** and reflect changes — when `!postpoll` fires (FR-029), when the `sync` command runs, and when the `fixtures` command runs. There is **no** scheduled/daily fixture check; all refreshing is triggered by one of these actions.
 - **FR-004**: System MUST retain historic data across multiple seasons.
-- **FR-005**: System MUST detect season transitions when previously scraped fixtures are no longer present on the club website, automatically creating a new season while preserving previous season data.
+- **FR-005**: System MUST detect season transitions when previously scraped fixtures are no longer present on the club website — evaluated during on-demand fetches (`!postpoll`, `sync`, `fixtures`; FR-003) rather than on a schedule — creating a new season while preserving previous season data.
 
 #### WhatsApp integration (via the Gateway library — spec 002)
 
@@ -194,9 +210,11 @@ As a team captain, I need the system to recognize automatically when a new seaso
 
 #### Availability polls
 
-- **FR-012**: System MUST post an availability poll for the next fixture on the day after each game (e.g., Monday game → Tuesday poll) by calling the Gateway's send-poll capability, and MUST persist the **poll keyset** the Gateway returns so later votes can be decrypted and attributed.
+- **FR-012**: System MUST post an availability poll for the next fixture **only when manually triggered** — by an `!postpoll` message in the authorized group (FR-029) or by the `poll` CLI command — by first re-fetching fixtures (FR-003) and then calling the Gateway's send-poll capability; it MUST persist the **poll keyset** the Gateway returns so later votes can be decrypted and attributed. There is no automatic post-game scheduling.
 - **FR-013**: System MUST record each poll response against the voter's canonical identity as provided by the Gateway's per-voter vote events, aggregating those events into the current tally by applying each as a replace-by-voter update (a vote change replaces the prior selection; a withdrawal clears it). The system MUST NOT double-count a person who appears under two address forms.
 - **FR-014**: When the Gateway requests a poll's keyset to decrypt a vote, the system MUST supply the stored keyset for that poll; if the system has no keyset for the poll (e.g., unknown or replaced), it MUST allow the Gateway to skip that vote without error.
+- **FR-028**: When a poll trigger fires (FR-029 / `poll` CLI) but, after the on-demand fetch (FR-003), there is **no confirmed next fixture** (the scraper skipped a "Fixtures to be confirmed" placeholder, yielding none) **or the fetch failed** (club site unreachable), the system MUST post **no** poll and MUST reply in the authorized group explaining why (e.g. "no confirmed next fixture yet" / "couldn't reach the club site"), then wait for the next manual trigger. This human-initiated check replaces the former automatic unconfirmed-fixture guard; the operator decides when a fixture is ready before triggering.
+- **FR-029**: System MUST treat a group message whose whole text (case-insensitive, whitespace-trimmed) equals `!postpoll` as a poll-post command, sent by **any** member of the authorized group. On such a message the system MUST re-fetch fixtures (FR-003) and post the next fixture's poll (FR-012), or — if a poll already exists for that fixture slot — replace it (FR-027). The command MUST be intercepted **before** stat extraction so it is never captured as a stat (FR-015). The system MUST be silent in-chat on success and reply only on the problem cases of FR-028. **Caveat (accepted):** because any member may send `!postpoll`, any member can force a replacement that hard-deletes an existing poll and all its recorded votes; this footgun is accepted for MVP simplicity.
 
 #### Stat capture
 
@@ -204,21 +222,21 @@ As a team captain, I need the system to recognize automatically when a new seaso
 - **FR-016**: System MUST handle various natural-language expressions for goals and assists (e.g., "scored", "2 goals", "got one", "assisted").
 - **FR-017**: System MUST attempt stat capture only during the 3-day window following a game; messages outside this window are treated as ordinary chat.
 - **FR-018**: System MUST be conservative in stat capture, using confidence scoring (0–100%) and only capturing stats when confidence exceeds 70%, and MUST NOT over-interpret general chat.
-- **FR-019**: System MUST attribute captured stats to the canonical identity of the player who sent the message, linked to the relevant game; it MUST accept partial messages and update only the specific fields mentioned (e.g., "2 goals" in one message, "1 assist" in another). Multiple messages from the same player within the 3-day window merge/update their stats for that game; message edits/deletes are ignored.
+- **FR-019**: System MUST attribute captured stats to the canonical identity of the player who sent the message, linked to the relevant game; it MUST accept partial messages and update only the specific fields mentioned (e.g., "2 goals" in one message, "1 assist" in another). Multiple messages from the same player within the 3-day window merge/update their stats for that game. A later message overrides **only the fields it mentions**, including explicit corrections (e.g., after "2 goals, 2 assists", a later "correction 1 goal" sets goals=1 and leaves assists=2 unchanged). This player-driven override is the **only** way stored stats change — there is no captain-side editing (FR-024). WhatsApp message edits/deletes are ignored.
 - **FR-020**: System MUST apply defaults only for the initial stat capture when values are not explicitly stated: goals=0, assists=0, weight=unknown, tracking=no; subsequent partial messages update only the fields mentioned without resetting other fields.
 - **FR-021**: System MUST capture weight as direction only (`up`/`down`/`same`/`unknown`) and MUST NOT capture weight values, BMI, or other health data.
 
-#### Storage, viewing & correction
+#### Storage & viewing
 
 - **FR-022**: System MUST store captured stats and poll responses in a database, retained per season.
 - **FR-023**: Captain MUST be able to view recorded stats for any game in the current or previous seasons.
-- **FR-024**: Captain MUST be able to correct recorded stats, including for past seasons.
+- **FR-024**: System MUST NOT provide a captain-side stat-correction/edit command. Stored stats change **only** via a player sending a further message within the 3-day window (a field-level override per FR-019). Captain-driven correction (including for past seasons) is **out of scope** for this MVP.
 - **FR-025**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, connection-state changes, errors) to provide a full audit trail for debugging and monitoring.
 
 #### Poll replacement
 
-- **FR-026**: System MUST detect when a fixture has been rescheduled (date/time/venue changed) after a poll has been posted, then replace the existing poll using the same hard-delete-and-replace process defined in FR-027.
-- **FR-027**: When a poll is replaced — whether triggered manually via `poll --force` or automatically via FR-026 reschedule detection — the system MUST hard-delete the previous poll record and cascade-delete all poll responses belonging to it (no orphaned responses, no soft-delete/superseded marker). The system MUST then request deletion of the previous poll message through the Gateway's best-effort delete capability; if the Gateway reports the deletion failed (window passed, message already gone, network failure), the system MUST log a warning with a timestamp and continue with the database deletion and new poll rather than blocking, retrying, or aborting.
+- **FR-026**: When a fixture is rescheduled, replacement is **manual, not automatic**: a human re-sends `!postpoll` (or runs `poll --force`), which re-fetches fixtures and replaces the existing poll via FR-027. The system does **not** automatically detect reschedules or auto-replace polls.
+- **FR-027**: When a poll is replaced — triggered by re-sending `!postpoll` (FR-029) or via the `poll --force` CLI — the system MUST hard-delete the previous poll record and cascade-delete all poll responses belonging to it (no orphaned responses, no soft-delete/superseded marker). The system MUST then request deletion of the previous poll message through the Gateway's best-effort delete capability; if the Gateway reports the deletion failed (window passed, message already gone, network failure), the system MUST log a warning with a timestamp and continue with the database deletion and new poll rather than blocking, retrying, or aborting.
 
 ### Key Entities
 
@@ -236,10 +254,10 @@ As a team captain, I need the system to recognize automatically when a new seaso
 ### Measurable Outcomes
 
 - **SC-001**: Captain can view all team fixtures for the current season within 5 seconds of requesting them.
-- **SC-002**: Availability polls are posted to WhatsApp within 1 hour of the scheduled post time (the day after each game).
+- **SC-002**: When `!postpoll` is sent in the authorized group, the system responds within 30 seconds — either posting the poll, or (on no confirmed fixture / fetch failure) posting a problem reply in-chat.
 - **SC-003**: 80% of clear stat messages (confidence >70%) are correctly captured during the 3-day window.
 - **SC-004**: False-positive rate for stat capture is below 5% (confidence scoring prevents casual-chat misinterpretation).
-- **SC-005**: Captain can view and correct stats for any game in under 30 seconds.
+- **SC-005**: Captain can view stats for any game in under 30 seconds.
 - **SC-006**: Season transitions are detected automatically when old fixtures disappear from the club website, with 100% accuracy (no data loss or cross-season contamination).
 - **SC-007**: System maintains 99.9% data integrity across multiple seasons (no loss of historical stats or poll responses).
 - **SC-008**: Poll-response capture rate is 100% (every vote the Gateway emits is recorded against the correct person, with no double-counting across address forms).
@@ -259,9 +277,9 @@ As a team captain, I need the system to recognize automatically when a new seaso
 - Internet connectivity is generally available for periodic fixture checks and WhatsApp monitoring.
 - The captain is authorized to monitor the WhatsApp group and collect player stats (no consent mechanism needed for this personal project).
 - Weight direction data is sufficient; actual weight values or BMI are not needed.
-- Stat-capture accuracy of 80% is acceptable given the conservative approach (70% confidence threshold) and manual correction capability; natural-language processing can distinguish stat reports from casual chat with reasonable accuracy using confidence scoring.
-- Fixture data on the club website is accurate and updated by the league administrators; daily 6 AM UK checks are sufficient, with manual refresh for urgent reschedules.
-- The 3-day post-game window is sufficient for players to report stats; posting on the day after a game aligns with typical team coordination timelines.
+- Stat-capture accuracy of 80% is acceptable given the conservative approach (70% confidence threshold) and the player-driven correction path (a follow-up message overrides earlier values, FR-019); natural-language processing can distinguish stat reports from casual chat with reasonable accuracy using confidence scoring.
+- Fixture data on the club website is accurate and updated by the league administrators; on-demand fetches (at `!postpoll`/`sync`/`fixtures`) are sufficient, since a human triggers a poll only once they can see the next fixture is confirmed.
+- The 3-day post-game window is sufficient for players to report stats; a human triggering `!postpoll` the day after a game aligns with typical team coordination timelines.
 - Database storage can scale to multiple seasons for a single team (estimated: 20–30 games/season, 10–15 players/team, 5+ seasons).
 - Initial WhatsApp setup requires a one-time `captain-stats connect` run to authenticate (QR scan) and identify the target group; the operator sets `AUTHORIZED_GROUP_ID` in `.env` before starting the daemon. The `connect` command and the daemon share the same persisted Gateway credential snapshot, so no duplicate QR scan is needed on first daemon start.
 - Timezone handling defaults to UK time since MAN v FAT Football is UK-based.
