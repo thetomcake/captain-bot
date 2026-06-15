@@ -9,12 +9,19 @@
 // Phase 3 (US1) adds the connection lifecycle: connect / disconnect / forceReauth /
 // getCredentials, socket creation wired to the message-store's getMessage, and the
 // reducer-driven transitions. Messaging, polls, groups and delete come in later phases.
-import makeWASocket, { Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, {
+  Browsers,
+  isLidUser,
+  isPnUser,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
 import type {
   ConnectionState,
   MessageUpsertType,
   WAMessage,
+  WAMessageKey,
   WASocket,
+  proto,
 } from '@whiskeysockets/baileys';
 import type {
   ConnectionStatus,
@@ -23,9 +30,14 @@ import type {
   IncomingMessage,
   Logger,
   MessageRef,
+  PollKeyset,
+  PollSendResult,
+  PollSpec,
   PollVote,
   WhatsAppCredentials,
 } from './types.js';
+import { validatePollSpec } from './polls/poll-options.js';
+import { decryptVote } from './polls/poll-vote-decryptor.js';
 import { resolveConfig, type ResolvedGatewayConfig } from './config.js';
 import { requireConnected } from './connection/require-connected.js';
 import { createAuthStore, type AuthStore } from './auth/auth-state.js';
@@ -33,7 +45,7 @@ import { MessageStore, messageStoreKey } from './messages/message-store.js';
 import { GroupFilter } from './groups/group-filter.js';
 import { IdentityResolver } from './identity/identity-resolver.js';
 import { RateLimiter } from './rate-limiter.js';
-import { isNewInbound, mapIncomingMessage } from './messages/message-mapper.js';
+import { isNewInbound, mapIncomingMessage, normalizeTimestamp } from './messages/message-mapper.js';
 import {
   reduceConnection,
   initialConnectionState,
@@ -83,6 +95,13 @@ export class WhatsAppGateway {
   private sock: WASocket | undefined;
   private reducerState: ConnectionReducerState = initialConnectionState();
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // US3 poll state (in-session only; never persisted). Resolved poll secrets+options keyed
+  // by `${groupId}:${pollId}` so repeat votes skip the consumer round-trip; learned group
+  // addressing modes to order the #2342 creator try-both. Both empty after a restart — the
+  // consumer's keyset (resolvePollKeyset) is the durable, restart-proof source.
+  private readonly resolvedKeysets = new Map<string, { secret: Uint8Array; options: string[] }>();
+  private readonly groupAddressingMode = new Map<string, 'pn' | 'lid'>();
 
   // connect() resolves once 'connected'; multiple concurrent callers share one attempt.
   private connectWaiters: ConnectWaiter[] = [];
@@ -199,12 +218,16 @@ export class WhatsAppGateway {
       throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
     }
     const participating = await this.sock.groupFetchAllParticipating();
-    return Object.values(participating).map((metadata) => ({
-      id: metadata.id,
-      name: metadata.subject,
+    return Object.values(participating).map((metadata) => {
       // The enum's runtime values are exactly 'pn' | 'lid'; narrow to the public union.
-      addressingMode: metadata.addressingMode as GroupSummary['addressingMode'],
-    }));
+      const addressingMode = metadata.addressingMode as GroupSummary['addressingMode'];
+      // Seed the addressing-mode cache so poll-vote handling can order the creator try-both
+      // without an extra metadata fetch (C-3).
+      if (addressingMode) {
+        this.groupAddressingMode.set(metadata.id, addressingMode);
+      }
+      return { id: metadata.id, name: metadata.subject, addressingMode };
+    });
   }
 
   // ── Messaging (US2) ─────────────────────────────────────────────────────────────---
@@ -231,6 +254,57 @@ export class WhatsAppGateway {
     // Cache the outbound message for getMessage send-retries (§2).
     this.messageStore.set(sent);
     return { id: sent.key.id, groupId };
+  }
+
+  // ── Polls (US3) ─────────────────────────────────────────────────────────────────---
+  /**
+   * Post a native single-choice poll to a group and return both a {@link MessageRef} and the
+   * {@link PollKeyset} the consumer MUST persist to decrypt later votes (FR-020/FR-021).
+   * Guards via `requireConnected`; rate-limited (≤5 msg/min, FR-016); validates 2–12 non-empty
+   * options first. Always sends `selectableCount: 1` — multi-select is out of scope.
+   *
+   * Verified against installed 7.0.0-rc13 (FR-031): `sock.sendMessage(jid, { poll: { name,
+   * values, selectableCount } })` returns a `WAMessage` whose `message.messageContextInfo
+   * .messageSecret` is the 32-byte secret for this poll's votes (lib/Utils/messages.js poll
+   * branch). A single-choice poll is stored as `pollCreationMessageV3`.
+   */
+  async sendPoll(groupId: string, poll: PollSpec): Promise<PollSendResult> {
+    requireConnected(this.reducerState.status);
+    if (!this.sock) {
+      throw new Error('WhatsAppGateway: no active socket while connected (unexpected)');
+    }
+    // Validate consumer input that TypeScript cannot enforce (2–12 non-empty options, FR-020).
+    validatePollSpec(poll);
+    const sock = this.sock;
+    const sent = await this.sendLimiter.execute(() =>
+      sock.sendMessage(groupId, {
+        poll: { name: poll.question, values: poll.options, selectableCount: 1 },
+      })
+    );
+    if (!sent?.key?.id) {
+      throw new Error('WhatsAppGateway: sendPoll returned no usable message reference');
+    }
+    const secret = sent.message?.messageContextInfo?.messageSecret;
+    if (!secret) {
+      throw new Error('WhatsAppGateway: sendPoll — no messageSecret on the returned poll message');
+    }
+    const pollId = sent.key.id;
+    // Cache the poll-creation message (backs getMessage + the in-session poll-secret fast-path).
+    this.messageStore.set(sent);
+    const secretBytes = toBytes(secret);
+    // Seed the in-session secret cache so our own poll's votes decrypt with no consumer round-trip.
+    this.resolvedKeysets.set(messageStoreKey(groupId, pollId), {
+      secret: secretBytes,
+      options: poll.options,
+    });
+    const keyset: PollKeyset = {
+      pollId,
+      groupId,
+      messageSecret: Buffer.from(secretBytes).toString('base64'),
+      options: poll.options,
+    };
+    this.config.logger.info('WhatsAppGateway: poll sent', { pollId, options: poll.options.length });
+    return { ref: { id: pollId, groupId }, keyset };
   }
 
   // ── Subscriptions ───────────────────────────────────────────────────────────────---
@@ -324,8 +398,15 @@ export class WhatsAppGateway {
         type,
         newInbound,
         authorized,
+        isPollVote: msg.message?.pollUpdateMessage != null,
       });
 
+      // SINGLE authorization chokepoint (FR-017/SC-004): only a live ('notify') message from an
+      // authorized chat proceeds past here. EVERY downstream path — text dispatch AND poll-vote
+      // handling — trusts this gate, so the zero-leakage invariant is enforced in exactly one
+      // place. A poll vote always arrives in the poll's own chat, so `msg.key.remoteJid` is that
+      // group (handlePollUpdate still derives the PollRef's groupId from the poll-creation key,
+      // per research §11, but no longer re-filters).
       if (!newInbound) {
         this.config.logger.debug('WhatsAppGateway: skipping non-live item', {
           reason: `type=${type} (only 'notify' is live; 'append' = history / own programmatic-send echo)`,
@@ -340,6 +421,13 @@ export class WhatsAppGateway {
           remoteJid,
           authorizedGroups: this.config.authorizedGroups,
         });
+        continue;
+      }
+
+      // Route an authorized, live message. Poll votes decrypt → onPollVote (never onMessage
+      // text dispatch, US3/FR-022); everything else maps → onMessage.
+      if (msg.message?.pollUpdateMessage) {
+        void this.handlePollUpdate(msg);
         continue;
       }
 
@@ -366,6 +454,254 @@ export class WhatsAppGateway {
         }
       } catch (err) {
         this.config.logger.error('WhatsAppGateway: onMessage handler threw', err);
+      }
+    }
+  }
+
+  /**
+   * Handle one raw `pollUpdateMessage` (US3, FR-021–FR-024; research.md §7). The caller
+   * (`handleMessagesUpsert`) has already enforced the live + authorized-group gate, so this is
+   * reached only for a live vote in an authorized chat — it does NOT re-filter (the single
+   * authorization chokepoint lives in the caller). rc13 ships no in-core vote decryption, so we
+   * do it ourselves: derive the poll's group+id from the `pollCreationMessageKey` (research §11),
+   * resolve the secret+options (in-session store first, else `resolvePollKeyset`; neither ⇒ skip,
+   * no error), decrypt with the #2342 creator try-both, canonicalize the voter, and emit a
+   * per-voter `PollVote`. Never throws — any failure is logged and the vote is skipped.
+   */
+  private async handlePollUpdate(msg: WAMessage): Promise<void> {
+    try {
+      const pollUpdate = msg.message?.pollUpdateMessage;
+      if (!pollUpdate) {
+        return;
+      }
+      const creationKey = pollUpdate.pollCreationMessageKey;
+      // The PollRef's group is the poll-creation message's chat (research §11); for a vote this
+      // is the same chat the caller already authorized (`msg.key.remoteJid`), with a fallback.
+      const groupId = creationKey?.remoteJid ?? msg.key?.remoteJid ?? undefined;
+      const pollId = creationKey?.id ?? undefined;
+      const encVote = pollUpdate.vote ?? undefined;
+      if (!groupId || !pollId || !encVote) {
+        this.config.logger.debug('WhatsAppGateway: poll update missing group/id/vote — skipping');
+        return;
+      }
+
+      const resolved = await this.resolvePollSecret(groupId, pollId);
+      if (!resolved) {
+        this.config.logger.debug(
+          'WhatsAppGateway: no keyset for poll (not cached and resolvePollKeyset gave none) — skipping vote',
+          { pollId, groupId }
+        );
+        return;
+      }
+
+      await this.ensureAddressingMode(groupId);
+      const creatorCandidates = this.pollCreatorCandidates(creationKey, groupId);
+      const voterCandidates = this.pollVoterCandidates(msg.key, groupId);
+
+      // Diagnostic snapshot of every JID form in play — the raw forms WhatsApp delivered plus the
+      // exact values we feed `decryptPollVote`. Logged before the attempt (debug) and again on
+      // failure (warn) so a decrypt failure is debuggable without re-running. (See research §7 /
+      // #1678 / #2342: the sign + GCM AAD mix BOTH creator and voter JIDs, so a form mismatch on
+      // either side fails the auth tag.)
+      const forms = {
+        pollId,
+        groupId,
+        addressingMode: this.groupAddressingMode.get(groupId) ?? 'unknown',
+        // What we PASS to decryptPollVote (the full creator × voter matrix is tried):
+        creatorCandidates,
+        voterCandidates,
+        // RAW forms from the vote's own message key:
+        voteFromMe: msg.key?.fromMe === true,
+        voteParticipant: msg.key?.participant ?? undefined,
+        voteParticipantAlt: msg.key?.participantAlt ?? undefined,
+        voteRemoteJid: msg.key?.remoteJid ?? undefined,
+        // RAW forms from the poll-creation message key (the creator/our own poll):
+        creationFromMe: creationKey?.fromMe === true,
+        creationParticipant: creationKey?.participant ?? undefined,
+        // Our own account's identity forms (creator side when fromMe):
+        selfId: this.sock?.user?.id ?? undefined,
+        selfLid: this.sock?.user?.lid ?? undefined,
+        selfPhoneNumber: this.sock?.user?.phoneNumber ?? undefined,
+      };
+
+      if (voterCandidates.length === 0 || creatorCandidates.length === 0) {
+        this.config.logger.warn(
+          'WhatsAppGateway: cannot resolve poll voter/creator — skipping',
+          forms
+        );
+        return;
+      }
+
+      this.config.logger.debug('WhatsAppGateway: attempting poll-vote decrypt', forms);
+
+      const selectedOptions = decryptVote({
+        vote: encVote,
+        pollMsgId: pollId,
+        voterCandidates,
+        creatorCandidates,
+        pollEncKey: resolved.secret,
+        options: resolved.options,
+      });
+      if (selectedOptions === null) {
+        // Mirrors Baileys' own "failed to decrypt poll vote" warning, but non-fatal (FR-021).
+        // Logged at warn WITH the full form snapshot so the LID/PN mismatch is visible — compare
+        // `voterJid`/`creatorCandidates` (what we tried) against the raw vote* forms (what arrived).
+        this.config.logger.warn('WhatsAppGateway: failed to decrypt poll vote — skipping', forms);
+        return;
+      }
+
+      const voter = this.identityResolver.resolve(
+        msg.key?.participant ?? msg.key?.remoteJid ?? '',
+        msg.key?.participantAlt ?? undefined,
+        msg.pushName ?? undefined
+      );
+      const vote: PollVote = {
+        pollId,
+        groupId,
+        voter,
+        selectedOptions,
+        timestamp: pollVoteTimestamp(pollUpdate, msg),
+      };
+      this.config.logger.debug('WhatsAppGateway: dispatching poll vote', {
+        pollId,
+        voter: voter.canonicalId,
+        selectedOptions,
+      });
+      this.dispatchPollVote(vote);
+    } catch (err) {
+      this.config.logger.error('WhatsAppGateway: error handling poll update (skipping)', err);
+    }
+  }
+
+  /**
+   * Resolve a poll's decryption secret + option names. First-choice is the in-session message
+   * store (the cached poll-creation message), then the consumer's `resolvePollKeyset` (the
+   * durable, restart-proof fallback). Resolved keysets are cached in-session. Returns
+   * `undefined` when neither source yields it (the vote is skipped, no error — FR-021).
+   */
+  private async resolvePollSecret(
+    groupId: string,
+    pollId: string
+  ): Promise<{ secret: Uint8Array; options: string[] } | undefined> {
+    const cacheKey = messageStoreKey(groupId, pollId);
+    const cached = this.resolvedKeysets.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // 1. In-session fast path: the poll-creation message is still cached this session.
+    const creation = this.messageStore.getByPollId(groupId, pollId);
+    if (creation) {
+      const secret = creation.message?.messageContextInfo?.messageSecret;
+      const options = pollOptionNames(creation);
+      if (secret && options.length > 0) {
+        const resolved = { secret: toBytes(secret), options };
+        this.resolvedKeysets.set(cacheKey, resolved);
+        return resolved;
+      }
+    }
+
+    // 2. Durable fallback: ask the consumer for the persisted keyset.
+    if (this.config.resolvePollKeyset) {
+      try {
+        const keyset = await this.config.resolvePollKeyset({ pollId, groupId });
+        if (keyset) {
+          const resolved = {
+            secret: new Uint8Array(Buffer.from(keyset.messageSecret, 'base64')),
+            options: keyset.options,
+          };
+          this.resolvedKeysets.set(cacheKey, resolved);
+          return resolved;
+        }
+      } catch (err) {
+        this.config.logger.debug('WhatsAppGateway: resolvePollKeyset threw — skipping vote', err);
+      }
+    }
+    return undefined;
+  }
+
+  /** Lazily fetch + cache a group's addressing mode (drives the creator try-both order, C-3). */
+  private async ensureAddressingMode(groupId: string): Promise<void> {
+    if (this.groupAddressingMode.has(groupId) || !this.sock) {
+      return;
+    }
+    try {
+      const metadata = await this.sock.groupMetadata(groupId);
+      if (metadata.addressingMode) {
+        this.groupAddressingMode.set(groupId, metadata.addressingMode as 'pn' | 'lid');
+      }
+    } catch (err) {
+      this.config.logger.debug('WhatsAppGateway: could not fetch group addressingMode', err);
+    }
+  }
+
+  /**
+   * Build the ordered creator-JID candidates for the #2342 try-both (C-3). For a poll WE
+   * created (`fromMe`), both our own LID and PN forms are returned — LID-first in a LID group,
+   * PN-first otherwise — so the decryptor makes genuinely distinct attempts. For someone
+   * else's poll, the creator is the message author.
+   */
+  private pollCreatorCandidates(
+    creationKey: WAMessageKey | null | undefined,
+    groupId: string
+  ): string[] {
+    if (creationKey?.fromMe && this.sock?.user) {
+      const user = this.sock.user;
+      const lid = user.lid ? jidNormalizedUser(user.lid) : undefined;
+      const pn = user.phoneNumber
+        ? jidNormalizedUser(user.phoneNumber)
+        : user.id
+          ? jidNormalizedUser(user.id)
+          : undefined;
+      const mode = this.groupAddressingMode.get(groupId);
+      // Pass BOTH forms regardless (the try-both must run); mode only chooses which to try first.
+      const ordered = mode === 'pn' ? [pn, lid] : [lid, pn];
+      return uniqueDefined(ordered);
+    }
+    const author =
+      creationKey?.participant ??
+      creationKey?.participantAlt ??
+      creationKey?.remoteJid ??
+      undefined;
+    return author ? [jidNormalizedUser(author)] : [];
+  }
+
+  /**
+   * Build the ordered voter-JID candidates for the decrypt matrix. A LID-addressed group encrypts
+   * the vote under the voter's **LID** form, a PN group under **PN** (observed against a real LID
+   * group — the working vote used voter=LID; a PN-only attempt fails). So we pass BOTH the voter's
+   * LID and PN forms, LID-first in a LID group, plus the raw participant and (for our own vote)
+   * our own forms as fallbacks. The decryptor tries each until the auth tag accepts one.
+   */
+  private pollVoterCandidates(key: WAMessageKey | null | undefined, groupId: string): string[] {
+    const participant = key?.participant ?? undefined;
+    const alt = key?.participantAlt ?? undefined;
+    const lid = [participant, alt].find((jid) => jid && isLidUser(jid));
+    const pn = [participant, alt].find((jid) => jid && isPnUser(jid));
+    const mode = this.groupAddressingMode.get(groupId);
+    const ordered: Array<string | undefined> = mode === 'pn' ? [pn, lid] : [lid, pn];
+    // Raw forms as fallbacks (covers anything not classified as PN/LID).
+    ordered.push(participant, alt);
+    // Our own vote: getKeyAuthor resolves a fromMe author to our own id, so include our forms.
+    if (key?.fromMe && this.sock?.user) {
+      const user = this.sock.user;
+      ordered.push(user.lid ?? undefined, user.phoneNumber ?? user.id ?? undefined);
+    }
+    return uniqueDefined(ordered.map((jid) => (jid ? jidNormalizedUser(jid) : undefined)));
+  }
+
+  /** Fan a decoded vote out to subscribers; a handler that throws/rejects can't break us. */
+  private dispatchPollVote(vote: PollVote): void {
+    for (const handler of this.pollVoteHandlers) {
+      try {
+        const result = handler(vote);
+        if (result instanceof Promise) {
+          result.catch((err) =>
+            this.config.logger.error('WhatsAppGateway: onPollVote handler rejected', err)
+          );
+        }
+      } catch (err) {
+        this.config.logger.error('WhatsAppGateway: onPollVote handler threw', err);
       }
     }
   }
@@ -515,4 +851,52 @@ export class WhatsAppGateway {
 /** Pull the Baileys/Boom status code off a close error without importing @hapi/boom. */
 function extractStatusCode(error: unknown): number | undefined {
   return (error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
+}
+
+/** Coerce a Baileys secret (`Uint8Array`, possibly a `Buffer`) to a plain `Uint8Array`. */
+function toBytes(value: Uint8Array): Uint8Array {
+  return value instanceof Uint8Array ? value : new Uint8Array(value);
+}
+
+/** Drop `undefined`s and duplicates while preserving order. */
+function uniqueDefined(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    if (v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+/**
+ * Read a poll's option names from its cached creation message. A single-choice poll is stored
+ * as `pollCreationMessageV3` in rc13; older/multi/announcement variants use
+ * `pollCreationMessage`/`V2` — check all three (verified against installed
+ * `getAggregateVotesInPollMessage`, FR-031).
+ */
+function pollOptionNames(creation: WAMessage): string[] {
+  const content = creation.message;
+  const poll =
+    content?.pollCreationMessage ??
+    content?.pollCreationMessageV2 ??
+    content?.pollCreationMessageV3;
+  return (poll?.options ?? []).map((opt) => opt.optionName ?? '');
+}
+
+/**
+ * Timestamp for a vote: prefer the vote's own `senderTimestampMs` (ms), else fall back to the
+ * carrier message's `messageTimestamp` (seconds).
+ */
+function pollVoteTimestamp(pollUpdate: proto.Message.IPollUpdateMessage, msg: WAMessage): Date {
+  const ms = pollUpdate.senderTimestampMs;
+  if (ms != null) {
+    const asNumber = typeof ms === 'number' ? ms : (ms as { toNumber?: () => number }).toNumber?.();
+    if (typeof asNumber === 'number' && Number.isFinite(asNumber)) {
+      return new Date(asNumber);
+    }
+  }
+  return normalizeTimestamp(msg.messageTimestamp);
 }

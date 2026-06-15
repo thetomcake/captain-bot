@@ -28,7 +28,7 @@ export type {
   GatewayConfig,
 } from './types.js';
 
-// TODO(T036, Phase 5): export the pure `aggregateVotes(votes: PollVote[]): PollResult`
-// helper here once polls/poll-tally.ts exists. It is part of the contract's public
-// surface but is implemented in the US3 phase (test-first), so it is intentionally
-// not yet exported.
+// The pure, stateless consumer-side aggregation helper (US3). The library keeps no
+// durable tally — it emits per-voter PollVote deltas; this folds them into a per-option
+// PollResult (last-write-per-voter, LID/PN-canonical). No Baileys type appears in it.
+export { aggregateVotes } from './polls/poll-tally.js';
