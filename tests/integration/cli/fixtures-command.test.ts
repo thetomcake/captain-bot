@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { eq } from 'drizzle-orm';
 import * as schema from '#src/database/schema.js';
 import { getDatabase, closeDatabase } from '#src/database/client.js';
 import { fixturesCommand } from '#src/cli/commands/fixtures.js';
@@ -183,6 +184,27 @@ describe('CLI Fixtures Command Tests', () => {
 
       const output = consoleOutput.join('\n');
       expect(output).toContain('Season 1');
+      expect(exitCode).toBe(0);
+    });
+
+    it('should reflect updated fixture information when re-viewed (scenario 3)', async () => {
+      // The club website updated a venue; the persisted fixture is refreshed
+      const { db } = getDatabase();
+      await db
+        .update(schema.games)
+        .set({ venue: 'New Ground', updatedAt: new Date() })
+        .where(eq(schema.games.opponent, 'Red Devils'));
+
+      try {
+        await fixturesCommand({});
+      } catch (error: any) {
+        if (!(error instanceof ProcessExitError)) throw error;
+      }
+
+      const output = consoleOutput.join('\n');
+
+      // The view reflects the updated information (FR-003)
+      expect(output).toContain('New Ground');
       expect(exitCode).toBe(0);
     });
 

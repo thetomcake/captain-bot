@@ -85,14 +85,14 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 
 ### Tests for User Story 1 (write first, verify failing) ⚠️
 
-- [ ] T018 [P] [US1] Review/update `tests/integration/fixtures/fixture-retrieval.test.ts` to assert fields present + chronological ordering using the fake scraper (`tests/helpers/mock-scraper.ts`) and static HTML fixtures (acceptance scenarios 1–2).
-- [ ] T019 [P] [US1] Review/update `tests/integration/cli/fixtures-command.test.ts` for the `fixtures` command human + `--json` output (one structural test per output type) and the re-check/update path (scenario 3).
+- [X] T018 [P] [US1] Review/update `tests/integration/fixtures/fixture-retrieval.test.ts` to assert fields present + chronological ordering using the fake scraper (`tests/helpers/mock-scraper.ts`) and static HTML fixtures (acceptance scenarios 1–2). **Done:** added an explicit date/time/opponent/venue presence assertion (FR-002, scenario 1), strengthened the re-sync test to assert updates are reflected (FR-003, scenario 3), and migrated the stale `FR-021`→`FR-003` reference on the change-detection test.
+- [X] T019 [P] [US1] Review/update `tests/integration/cli/fixtures-command.test.ts` for the `fixtures` command human + `--json` output (one structural test per output type) and the re-check/update path (scenario 3). **Done:** human + `--json` structural tests already present; added a scenario-3 test asserting the view reflects updated persisted fixture data (FR-003).
 
 ### Implementation for User Story 1
 
-- [ ] T020 [US1] Review `src/scraping/fixture-scraper.ts` and `src/services/fixture-service.ts`: confirm they import no removed Baileys code, use the shared `src/utils/retry.ts` backoff, and persist via the updated schema; migrate any stale type references (T009).
-- [ ] T021 [US1] Review/migrate `src/cli/commands/fixtures.ts` and `src/cli/commands/sync.ts` against `contracts/cli-commands.md` (`--all`, `--season <n>`, `--json`; exit codes), ensuring chronological ordering and that `sync` re-scrapes and reflects updates (FR-002/FR-003).
-- [ ] T022 [US1] Confirm `src/cli/index.ts` routes `fixtures` and `sync`; make T018/T019 pass and verify SC-001 (< 5 s) on the fake-scraper path.
+- [X] T020 [US1] Review `src/scraping/fixture-scraper.ts` and `src/services/fixture-service.ts`: confirm they import no removed Baileys code, use the shared `src/utils/retry.ts` backoff, and persist via the updated schema; migrate any stale type references (T009). **Done:** grep confirms no `@whiskeysockets/baileys` / removed-module imports; `fetchWithRetry` uses `withRetry` from `utils/retry.ts`; both persist via the unchanged `games` schema and the `Game`/`GameStatus` entity types still align (no stale refs in source).
+- [X] T021 [US1] Review/migrate `src/cli/commands/fixtures.ts` and `src/cli/commands/sync.ts` against `contracts/cli-commands.md` (`--all`, `--season <n>`, `--json`; exit codes), ensuring chronological ordering and that `sync` re-scrapes and reflects updates (FR-002/FR-003). **Done:** per the contract `fixtures` is view-only (`--all`/`--season`/`--json`, ordered via `getFixtures`/`getUpcomingFixtures` `ORDER BY gameDate ASC`, exit `0`/`1`/`2`/`3`); `sync` re-scrapes via `syncFixtures`→`fetchFixtures` which upserts venue/status changes (reflects updates, FR-003), exit `0`/`3`. No code change required.
+- [X] T022 [US1] Confirm `src/cli/index.ts` routes `fixtures` and `sync`; make T018/T019 pass and verify SC-001 (< 5 s) on the fake-scraper path. **Done:** routes present (`index.ts` `case 'fixtures'`, `case 'sync'`); US1 suite green (20/20) and the SC-001 (< 5 s) fixtures-command perf test passes.
 
 **Checkpoint**: US1 is independently functional and testable on the Gateway-clean codebase.
 

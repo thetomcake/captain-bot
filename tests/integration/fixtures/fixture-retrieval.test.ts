@@ -93,6 +93,20 @@ describe('Fixture Service Integration Tests', () => {
 
       expect(upcomingGames.length).toBeGreaterThan(0);
     });
+
+    it('should retrieve date, time, opponent, and venue for each fixture (FR-002, scenario 1)', async () => {
+      const fixtures = await fixtureService.fetchFixtures(teamId);
+
+      expect(fixtures.length).toBeGreaterThan(0);
+
+      // Scenario 1: every fixture carries date+time (in gameDate), opponent, and venue
+      for (const game of fixtures) {
+        expect(game.gameDate).toBeInstanceOf(Date);
+        expect(Number.isNaN(game.gameDate.getTime())).toBe(false);
+        expect(game.opponent.length).toBeGreaterThan(0);
+        expect(game.venue.length).toBeGreaterThan(0);
+      }
+    });
   });
 
   describe('syncFixtures', () => {
@@ -115,7 +129,7 @@ describe('Fixture Service Integration Tests', () => {
       expect(secondSyncCount.length).toBeGreaterThanOrEqual(firstSyncCount.length);
     });
 
-    it('should detect fixture changes (FR-021)', async () => {
+    it('should detect fixture changes (FR-003)', async () => {
       // First sync - store original fixtures
       await fixtureService.fetchFixtures(teamId);
 
@@ -170,6 +184,28 @@ describe('Fixture Service Integration Tests', () => {
       const freshFixtures = await fixtureService.fetchFixtures(teamId, { forceRefresh: true });
 
       expect(freshFixtures.length).toBeGreaterThan(0);
+    });
+
+    it('should reflect updated fixture information on re-check (FR-003, scenario 3)', async () => {
+      const [game] = await fixtureService.fetchFixtures(teamId);
+      expect(game).toBeDefined();
+
+      // Simulate the stored venue drifting away from the club website
+      await db
+        .update(schema.games)
+        .set({ venue: 'Stale Venue', updatedAt: new Date() })
+        .where(eq(schema.games.id, game!.id));
+
+      // Re-check against the (unchanged) club website
+      await fixtureService.syncFixtures(teamId);
+
+      const [refreshed] = await db
+        .select()
+        .from(schema.games)
+        .where(eq(schema.games.id, game!.id));
+
+      // The re-scrape reflects the website's value, overwriting the drift
+      expect(refreshed!.venue).toBe(game!.venue);
     });
   });
 
