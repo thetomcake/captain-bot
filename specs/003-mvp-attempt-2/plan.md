@@ -196,6 +196,31 @@ credential and keyset stores. Services depend on the port (not on the concrete G
 on Baileys), so the fake Gateway in tests is a drop-in — preserving the service-boundary mocking
 philosophy. The non-WhatsApp domain stays where it is and is reused.
 
+## US6 — View Poll Responses (`fixtures --show-responses`) — added 2026-06-16
+
+A read-only addendum to the implemented MVP. It surfaces the poll responses US2 already captures
+(`polls` → `poll_responses` → `whatsapp_users`) under each fixture in the existing `fixtures` view.
+**No schema change** — all required data already exists; see the data-model addendum. No
+WhatsApp/Gateway interaction (it never connects), so no fake-Gateway wiring is needed in tests.
+
+**Disposition:** Implement (small, additive, view-only). Mirrors the US4 `stats` view's shape:
+service read method → pure formatter → command flag → router wiring → integration test.
+
+**Design (matches existing conventions):**
+
+| Layer | Change |
+|-------|--------|
+| `services/poll-service.ts` | **ADD** read method `getResponsesForGames(gameIds: number[]): Promise<Map<number, GamePollResponses>>` — left-join `polls`→`poll_responses`→`whatsapp_users` for the given games. Returns, per game with a poll, `{ pollQuestion, responses: PollResponseLine[] }` where `PollResponseLine = { canonicalId, displayName, selectedOption, respondedAt }`. Games with no poll are absent from the map (the formatter treats a missing entry as "no poll posted"); a poll with no votes yields an empty `responses` array. Ordered by poll-option order (Yes/No/Maybe via `getPollOptions()`) then `displayName`. One row per canonical identity is guaranteed by the existing `unique(poll_id, user_id)` constraint (FR-013/SC-008). |
+| `cli/output/formatters.ts` | **ADD** `formatFixturesWithResponsesTable(season, fixtures, responsesByGame)` and `formatFixturesWithResponsesJSON(season, fixtures, responsesByGame)`. The existing `formatFixturesTable`/`formatFixturesJSON` are **left untouched** (no-flag path unchanged, AS-5/FR-030). Human output reuses the fixtures table, then indents each fixture's responses (`  Name    <choice>`); fixtures with no poll print `  (no poll posted)`, polls with no votes print `  (no responses yet)`. Name falls back to `canonicalId` (AS-4), reusing the `displayName ?? canonicalId` idiom from the stats formatter. JSON adds a `poll` field per fixture: `null`, or `{ question, responses: [{ name, choice }] }`. |
+| `cli/commands/fixtures.ts` | When `options.showResponses`, after loading fixtures call `new PollService(...).getResponsesForGames(fixtures.map(f => f.id))` and route to the new formatters; otherwise the current path is unchanged. Reuses existing exit codes (`1` no fixtures, `3` error). |
+| `cli/index.ts` | Add `show-responses` to the `fixtures` boolean flags, pass `showResponses: parsed['show-responses']`, and add the `--show-responses` line to the `fixtures` help text. |
+| `tests/integration/fixtures/show-responses.test.ts` | **NEW** — real in-memory DB, real services (no Gateway). Seed: a game with a poll + several votes (incl. a user with `displayName = null`), a poll with zero votes, and a fixture with no poll. Assert: per-fixture grouping, Yes/No/Maybe ordering, canonical-id fallback, "no poll"/"no responses" rendering, `--json` shape, and that plain `fixtures` output is byte-for-byte unchanged (AS-5). |
+
+**Constitution re-check (US6):** CLI-First ✅ (flag on an existing subcommand, stdout/`--json`).
+Test-First ✅ (integration test seeded against the in-memory DB at the service boundary, written
+first). TypeScript ✅ (no `any`; new types exported from `poll-service.ts`). Security ✅ (read-only;
+no new inputs, credentials, or chat parsing). No new dependencies; no constitution violations.
+
 ## Complexity Tracking
 
 > No constitution violations — section intentionally empty.

@@ -9,7 +9,7 @@
  */
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
 import type { FixtureService } from './fixture-service.js';
 import type { Game, Poll, Season } from '../types/entities.js';
@@ -20,7 +20,7 @@ import type {
   PollVote,
 } from '../whatsapp/gateway-port.js';
 import { KeysetStore } from '../whatsapp/keyset-store.js';
-import { buildPollSpec } from '../whatsapp/poll-presenter.js';
+import { buildPollSpec, getPollOptions } from '../whatsapp/poll-presenter.js';
 import { logger } from '../utils/logger.js';
 
 export interface PostPollOptions {
@@ -48,14 +48,47 @@ type NextFixture =
   | { kind: 'no-fixture' }
   | { kind: 'fetch-failed'; error: string };
 
+/** One recorded poll response, voter-display name + selected option (US6, FR-030). */
+export interface PollResponseLine {
+  canonicalId: string;
+  displayName: string | null;
+  selectedOption: string;
+  respondedAt: Date;
+}
+
+/** A fixture's poll question with its recorded responses (US6, FR-030). */
+export interface GamePollResponses {
+  pollQuestion: string;
+  responses: PollResponseLine[];
+}
+
 export class PollService {
   constructor(
     private readonly db: BetterSQLite3Database<typeof schema>,
-    private readonly fixtureService: FixtureService,
-    private readonly gateway: IWhatsAppGateway,
-    private readonly groupId: string,
+    // The WhatsApp-coupled dependencies are optional: a PollService built with `db` alone serves
+    // the read-only `fixtures --show-responses` view (US6, FR-030 — no Gateway), while the daemon
+    // and `poll` CLI pass all three for the post/replace/vote lifecycle. The write-path getters
+    // below assert their presence so misuse fails loudly rather than silently.
+    private readonly fixtureService?: FixtureService,
+    private readonly gateway?: IWhatsAppGateway,
+    private readonly groupId?: string,
     private readonly keysetStore: KeysetStore = new KeysetStore(db)
   ) {}
+
+  private get fixtures(): FixtureService {
+    if (!this.fixtureService) throw new Error('PollService: fixtureService required for poll posting');
+    return this.fixtureService;
+  }
+
+  private get wa(): IWhatsAppGateway {
+    if (!this.gateway) throw new Error('PollService: gateway required for poll posting');
+    return this.gateway;
+  }
+
+  private get group(): string {
+    if (!this.groupId) throw new Error('PollService: groupId required for poll posting');
+    return this.groupId;
+  }
 
   /**
    * Re-fetch fixtures on demand (FR-003), pick the next confirmed fixture, and post — or
@@ -74,7 +107,7 @@ export class PollService {
 
     // Send first: a send failure aborts before any DB mutation (the existing poll survives).
     const spec = buildPollSpec(game);
-    const { ref, keyset } = await this.gateway.sendPoll(this.groupId, spec);
+    const { ref, keyset } = await this.wa.sendPoll(this.group, spec);
 
     if (existing) {
       await this.removeExistingPoll(existing);
@@ -91,7 +124,7 @@ export class PollService {
     const outcome = existing ? 'replaced' : 'posted';
     logger.info(`Poll ${outcome} for game ${game.id} (${game.opponent})`, {
       pollMessageId: ref.id,
-      groupId: this.groupId,
+      groupId: this.group,
     });
     return { outcome, ref, fixture: game };
   }
@@ -189,6 +222,60 @@ export class PollService {
     return (await this.getPoll(gameId)) !== null;
   }
 
+  /**
+   * Read-only projection backing `fixtures --show-responses` (US6, FR-030). For each requested
+   * game that has a poll, returns its question + recorded responses keyed by canonical identity
+   * (one row per person, FR-013/SC-008). Games with no poll are **absent** from the map (AS-2); a
+   * poll with no votes yields an empty `responses` array (AS-3). Responses are ordered by
+   * poll-option order (Yes/No/Maybe) then display name. No Gateway interaction.
+   */
+  async getResponsesForGames(gameIds: number[]): Promise<Map<number, GamePollResponses>> {
+    const byGame = new Map<number, GamePollResponses>();
+    if (gameIds.length === 0) return byGame;
+
+    const rows = await this.db
+      .select({
+        gameId: schema.polls.gameId,
+        pollQuestion: schema.polls.pollQuestion,
+        canonicalId: schema.whatsappUsers.canonicalId,
+        displayName: schema.whatsappUsers.displayName,
+        selectedOption: schema.pollResponses.selectedOption,
+        respondedAt: schema.pollResponses.respondedAt,
+      })
+      .from(schema.polls)
+      .leftJoin(schema.pollResponses, eq(schema.pollResponses.pollId, schema.polls.id))
+      .leftJoin(schema.whatsappUsers, eq(schema.pollResponses.userId, schema.whatsappUsers.id))
+      .where(inArray(schema.polls.gameId, gameIds));
+
+    for (const row of rows) {
+      let entry = byGame.get(row.gameId);
+      if (!entry) {
+        entry = { pollQuestion: row.pollQuestion, responses: [] };
+        byGame.set(row.gameId, entry);
+      }
+      // A poll with no votes surfaces as a single left-joined row with null response fields.
+      if (row.selectedOption !== null && row.canonicalId !== null) {
+        entry.responses.push({
+          canonicalId: row.canonicalId,
+          displayName: row.displayName,
+          selectedOption: row.selectedOption,
+          respondedAt: row.respondedAt!,
+        });
+      }
+    }
+
+    const optionOrder = getPollOptions();
+    for (const entry of byGame.values()) {
+      entry.responses.sort((a, b) => {
+        const byOption = optionOrder.indexOf(a.selectedOption) - optionOrder.indexOf(b.selectedOption);
+        if (byOption !== 0) return byOption;
+        return (a.displayName ?? a.canonicalId).localeCompare(b.displayName ?? b.canonicalId);
+      });
+    }
+
+    return byGame;
+  }
+
   // ── Private helpers ──────────────────────────────────────────────────────
 
   /**
@@ -201,7 +288,7 @@ export class PollService {
     if (!team) return { kind: 'no-fixture' };
 
     try {
-      await this.fixtureService.syncFixtures(team.id);
+      await this.fixtures.syncFixtures(team.id);
     } catch (error) {
       return { kind: 'fetch-failed', error: error instanceof Error ? error.message : String(error) };
     }
@@ -209,7 +296,7 @@ export class PollService {
     const season = await this.getCurrentSeason(team.id);
     if (!season) return { kind: 'no-fixture' };
 
-    const upcoming = await this.fixtureService.getUpcomingFixtures(season.id);
+    const upcoming = await this.fixtures.getUpcomingFixtures(season.id);
     const game = upcoming[0];
     return game ? { kind: 'fixture', game, teamId: team.id } : { kind: 'no-fixture' };
   }
@@ -246,7 +333,7 @@ export class PollService {
       .where(eq(schema.pollResponses.pollId, poll.id));
     await this.db.delete(schema.polls).where(eq(schema.polls.id, poll.id));
 
-    const outcome = await this.gateway.deleteMessage({
+    const outcome = await this.wa.deleteMessage({
       id: poll.pollMessageId,
       groupId: poll.groupId,
     });

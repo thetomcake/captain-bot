@@ -1,5 +1,6 @@
 import { Game, Season } from '../../types/entities.js';
 import type { PlayerStatLine } from '../../services/stat-service.js';
+import type { GamePollResponses } from '../../services/poll-service.js';
 
 /**
  * Format fixtures as a table for human-readable display
@@ -47,6 +48,82 @@ export function formatFixturesJSON(season: Season, fixtures: Game[]): string {
       venue: f.venue,
       status: f.status,
     })),
+  };
+
+  return JSON.stringify(output, null, 2);
+}
+
+// ── Fixtures + poll responses (US6, view-only — FR-030) ──────────────────────
+
+/**
+ * Format fixtures with each one's poll responses grouped beneath it (the `--show-responses` view,
+ * FR-030). Additive — `formatFixturesTable` is left untouched (AS-5). A fixture absent from the
+ * map has no poll (`(no poll posted)`, AS-2); a present fixture with no responses prints
+ * `(no responses yet)` (AS-3). Voter name falls back to the canonical identity (AS-4), mirroring
+ * the stats view.
+ */
+export function formatFixturesWithResponsesTable(
+  season: Season,
+  fixtures: Game[],
+  responsesByGame: Map<number, GamePollResponses>
+): string {
+  const out: string[] = [`Fixtures - Season ${season.seasonNumber}`, ''];
+
+  for (const fixture of fixtures) {
+    const date = formatDate(fixture.gameDate);
+    const time = formatTime(fixture.gameDate);
+    out.push(`${date} ${time}  vs ${fixture.opponent}  (${fixture.venue})  ${capitalizeFirst(fixture.status)}`);
+
+    const poll = responsesByGame.get(fixture.id);
+    if (!poll) {
+      out.push('  (no poll posted)');
+    } else if (poll.responses.length === 0) {
+      out.push('  (no responses yet)');
+    } else {
+      for (const r of poll.responses) {
+        const name = r.displayName ?? r.canonicalId;
+        out.push(`  ${name.padEnd(24)} ${r.selectedOption}`);
+      }
+    }
+    out.push('');
+  }
+
+  return out.join('\n').trimEnd();
+}
+
+/**
+ * Format fixtures with poll responses as JSON (AS-6). Each fixture object gains a `poll` field —
+ * `null` when there is no poll, or `{ question, responses: [{ name, choice }] }`. Additive —
+ * `formatFixturesJSON` is left untouched (AS-5).
+ */
+export function formatFixturesWithResponsesJSON(
+  season: Season,
+  fixtures: Game[],
+  responsesByGame: Map<number, GamePollResponses>
+): string {
+  const output = {
+    season: season.seasonNumber,
+    is_current: season.isCurrent,
+    fixtures: fixtures.map((f) => {
+      const poll = responsesByGame.get(f.id);
+      return {
+        id: f.id,
+        date: formatDate(f.gameDate),
+        time: formatTime(f.gameDate),
+        opponent: f.opponent,
+        venue: f.venue,
+        status: f.status,
+        poll: poll
+          ? {
+              question: poll.pollQuestion,
+              responses: poll.responses.map((r) => ({
+                name: r.displayName ?? r.canonicalId,
+                choice: r.selectedOption,
+              })),
+            }
+          : null,
+      };
+    }),
   };
 
   return JSON.stringify(output, null, 2);

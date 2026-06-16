@@ -167,6 +167,25 @@ As a team captain, I need the system to recognize automatically when a new seaso
 
 ---
 
+### User Story 6 - View Poll Responses (Priority: P6)
+
+As a team captain, I need to see who has voted and how on the availability polls — names and their availability choice, across the polls — so I can read availability per fixture from the CLI without scrolling WhatsApp.
+
+**Why this priority**: A read-only convenience over data US2 already captures. It adds no WhatsApp/Gateway behaviour and depends only on stored polls and responses, so it is the lowest-risk story and naturally last. It is delivered as a flag on the existing `fixtures` view (`--show-responses`) rather than a new command, so availability sits next to the fixture it belongs to.
+
+**Independent Test**: Seed games with a poll and several votes (including a voter with no display name, and a fixture with no poll), run `fixtures --show-responses`, and verify each fixture's poll shows every voter's name (canonical identity as fallback) and availability choice, that a fixture without a poll is shown without error, and that `--json` carries the same data.
+
+**Acceptance Scenarios**:
+
+1. **Given** a fixture has a poll with recorded votes, **When** I run `fixtures --show-responses`, **Then** under that fixture I see each voter's name and their availability choice (Yes/No/Maybe).
+2. **Given** a listed fixture has no poll, **When** I run `fixtures --show-responses`, **Then** that fixture is shown as having no poll (no error, no missing-data crash).
+3. **Given** a poll exists but no one has voted yet, **When** I run `fixtures --show-responses`, **Then** that fixture's poll is shown with no responses rather than being omitted.
+4. **Given** a voter has no stored display name, **When** their response is shown, **Then** their canonical identity is displayed instead (consistent with the `stats` view).
+5. **Given** I do not pass `--show-responses`, **When** I run `fixtures`, **Then** the output is unchanged from today (the flag is purely additive).
+6. **Given** `--json`, **When** I run `fixtures --show-responses --json`, **Then** each fixture object carries its poll responses (name + choice) or a null poll.
+
+---
+
 ### Edge Cases
 
 - When the club website is unavailable during an on-demand fetch triggered by `!postpoll`, the system posts no poll, replies in-chat that the club site couldn't be reached, logs it, and waits for the next manual trigger/`sync` (FR-028). There is no scheduled retry.
@@ -232,6 +251,7 @@ As a team captain, I need the system to recognize automatically when a new seaso
 - **FR-023**: Captain MUST be able to view recorded stats for any game in the current or previous seasons.
 - **FR-024**: System MUST NOT provide a captain-side stat-correction/edit command. Stored stats change **only** via a player sending a further message within the 3-day window (a field-level override per FR-019). Captain-driven correction (including for past seasons) is **out of scope** for this MVP.
 - **FR-025**: System MUST log all operations with timestamps (fixture checks, polls posted, messages processed, connection-state changes, errors) to provide a full audit trail for debugging and monitoring.
+- **FR-030**: System MUST provide a **read-only** way to view recorded poll responses from the CLI, surfaced as a `--show-responses` flag on the `fixtures` command. For each listed fixture that has a poll, the system MUST display every recorded response — the voter's display name (falling back to the canonical identity when no name is stored) and their selected availability option — grouped under that fixture. A listed fixture with no poll, and a poll with no responses, MUST each be shown without error rather than omitted. The flag MUST honour the existing `fixtures` selectors (`--all`, `--season <n>`, `--json`) and MUST NOT change `fixtures` output when it is absent. The view reads only stored data (no WhatsApp/Gateway interaction) and MUST NOT double-count a person who voted under two address forms (one response per canonical identity, per FR-013).
 
 #### Poll replacement
 
@@ -264,6 +284,7 @@ As a team captain, I need the system to recognize automatically when a new seaso
 - **SC-009**: System reduces the captain's manual stat-tracking time by at least 70% compared to manual spreadsheet entry.
 - **SC-010**: Full test suite completes in under 10 seconds to enable rapid TDD cycles and fast CI/CD feedback.
 - **SC-011**: No MVP source file imports or references the underlying WhatsApp protocol library; all WhatsApp behaviour is reached only through the Gateway's public interface (verifiable by inspection / a guard test).
+- **SC-012**: Captain can view availability responses across a season's polls (`fixtures --show-responses`) within 5 seconds of requesting them (consistent with SC-001), with every recorded vote shown against the correct person and no double-counting (SC-008).
 
 ## Assumptions
 

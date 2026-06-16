@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   // Parse arguments with minimist (handles edge cases properly)
   const parsed = minimist(process.argv.slice(2), {
     string: ['config'],
-    boolean: ['help', 'version', 'json'],
+    boolean: ['help', 'version', 'json', 'show-responses'],
     alias: { c: 'config', h: 'help', v: 'version' },
   });
 
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
         console.log('Options:');
         console.log('  --all              Show all fixtures (including completed)');
         console.log('  --season <number>  Show fixtures for specific season');
+        console.log('  --show-responses   List each fixture\'s recorded poll responses');
         console.log('  --json             Output in JSON format');
         console.log('  --config <path>    Config file path');
         console.log('  --help             Show this help message');
@@ -117,6 +118,7 @@ async function main(): Promise<void> {
         all: parsed.all,
         season: parsed.season ? parseInt(parsed.season) : undefined,
         json: parsed.json,
+        showResponses: parsed['show-responses'] as boolean | undefined,
       });
       break;
     }

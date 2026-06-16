@@ -141,3 +141,23 @@ current session's deltas, but never as the source of truth.)
   `WhatsAppMessage`/`PollVoteResult`/`ConnectionState`/`WhatsAppPoll` types (superseded by the
   Gateway's `IncomingMessage`/`PollVote`/`ConnectionStatus`/`PollSpec`, re-exported through the
   port). Keep `ExtractedStats` (pure stat-extractor output).
+
+---
+
+## US6 — View Poll Responses: no schema change (added 2026-06-16)
+
+The `fixtures --show-responses` view (US6, FR-030) is a **read-only projection over existing
+tables** — it adds **no columns, tables, or migrations**. It joins:
+
+- `games` (already listed by `fixtures`) → `polls` (`poll.gameId`, at most one per game) →
+  `poll_responses` (`selectedOption`, `respondedAt`) → `whatsapp_users` (`displayName`,
+  `canonicalId`).
+
+Read-only DTOs live in `src/services/poll-service.ts` (not the DB layer):
+
+- `PollResponseLine = { canonicalId: string; displayName: string | null; selectedOption: string; respondedAt: Date }`
+- `GamePollResponses = { pollQuestion: string; responses: PollResponseLine[] }`
+
+The existing `unique(poll_id, user_id)` constraint on `poll_responses` guarantees one line per
+canonical identity (no double-counting, FR-013/SC-008); `displayName` is nullable, so the view
+falls back to `canonicalId` (FR-030, AS-4).

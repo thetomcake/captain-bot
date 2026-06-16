@@ -198,6 +198,27 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 
 ---
 
+## Phase 9: User Story 6 — View Poll Responses (Priority: P6, view-only)
+
+**Goal**: Surface recorded poll responses (voter name + Yes/No/Maybe) under each fixture via a new `fixtures --show-responses` flag. Read-only over existing tables — **no schema change, no Gateway interaction** (data-model.md US6 addendum). Disposition: **implement** (small, additive); mirrors the US4 `stats` view shape (service read → pure formatter → command flag → route). Post-MVP addition (2026-06-16) appended after the completed Phase 8; depends only on the existing US2 poll/response persistence.
+
+**Independent Test**: Seed games with a poll + several votes (including a voter with `displayName = null`), a poll with zero votes, and a fixture with no poll; `fixtures --show-responses` groups each fixture's responses with the canonical-id fallback, renders "no poll"/"no responses" without error, and `--json` carries the same data; plain `fixtures` output is unchanged (FR-030, SC-012; acceptance scenarios 1–6).
+
+### Tests for User Story 6 (write first, verify failing) ⚠️
+
+- [X] T052 [P] [US6] Write `tests/integration/fixtures/show-responses.test.ts` (real in-memory DB + real services, **no Gateway**): seed a game with a poll and several votes (incl. a `displayName = null` user), a poll with zero votes, and a fixture with no poll; assert per-fixture grouping, Yes/No/Maybe ordering, canonical-id fallback (AS-4), `(no poll posted)` (AS-2) / `(no responses yet)` (AS-3) rendering, `--json` shape (`poll: null | { question, responses }`, AS-6), and that plain `fixtures` output is unchanged from no-flag (AS-5). Verify failing first (Constitution II). **Done:** drives the real `PollService.getResponsesForGames` directly (grouping/ordering/fallback/empty-list) **and** through `fixturesCommand({ showResponses })` (human + `--json` markers, plus the no-flag path asserting no `poll` field, AS-5). Verified failing first (4/5 red before impl).
+
+### Implementation for User Story 6
+
+- [X] T053 [US6] Add read method `getResponsesForGames(gameIds: number[]): Promise<Map<number, GamePollResponses>>` to `src/services/poll-service.ts` (left-join `polls`→`poll_responses`→`whatsapp_users`), plus the exported DTOs `PollResponseLine` and `GamePollResponses` (data-model.md US6 addendum). Games with no poll are absent from the map; a poll with no votes yields an empty `responses` array; order by poll-option order (`getPollOptions()`: Yes/No/Maybe) then `displayName`. One row per canonical identity (existing `unique(poll_id, user_id)` constraint, FR-013/SC-008). **Done (with adaptation):** the read path needs no Gateway, so the `PollService` constructor's three WhatsApp-coupled params (`fixtureService`/`gateway`/`groupId`) were made **optional** — `new PollService(db)` serves the view; the write-path call sites now go through private guard getters (`fixtures`/`wa`/`group`) that throw if misused, so the daemon/CLI behaviour is unchanged. Ordering done in JS (option index then name) since Yes/No/Maybe isn't a natural SQL sort.
+- [X] T054 [P] [US6] Add `formatFixturesWithResponsesTable(season, fixtures, responsesByGame)` and `formatFixturesWithResponsesJSON(season, fixtures, responsesByGame)` to `src/cli/output/formatters.ts` — **additive**; leave `formatFixturesTable`/`formatFixturesJSON` untouched (AS-5). Human: indent each fixture's responses (`  Name    <choice>`); `(no poll posted)` when absent from the map, `(no responses yet)` when the poll has no votes; name = `displayName ?? canonicalId` (reuse the stats-formatter idiom). JSON: add a `poll` field per fixture — `null` or `{ question, responses: [{ name, choice }] }`. **Done:** both formatters added below the fixtures section; `formatFixturesTable`/`JSON` untouched (AS-5 asserted by the no-flag test). Name padded to 24 cols mirroring the stats table.
+- [X] T055 [US6] Wire `src/cli/commands/fixtures.ts`: add `showResponses?: boolean` to `FixturesOptions`; when set, after loading fixtures call `new PollService(...).getResponsesForGames(fixtures.map(f => f.id))` and route to the new formatters; otherwise the current path is unchanged. Reuse existing exit codes (`1` no fixtures, `3` error). **Done:** `new PollService(db)` (db-only, no Gateway) → `getResponsesForGames` → the new formatters; the no-flag branch is byte-for-byte the prior code (AS-5). Exit codes unchanged.
+- [X] T056 [US6] Route the flag in `src/cli/index.ts`: add `show-responses` to the `fixtures` boolean flags, pass `showResponses: parsed['show-responses']`, add the `--show-responses` line to the `fixtures` help text; make T052 pass and confirm the full suite stays green in < 10 s (SC-010). **Done:** `show-responses` added to minimist's boolean list + passed through + help line added. T052 green; full suite **229/229 in ~7.9 s** (< 10 s, SC-010); `tsc` build clean; SC-011 no-Baileys guard still green.
+
+**Checkpoint**: Availability is readable from the CLI across a season's polls; plain `fixtures` behaviour is unchanged.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -219,6 +240,7 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 - **US3 (P3)**: Independently testable via `FakeGateway.simulateMessage`.
 - **US4 (P4)**: Independently testable with seeded data; surfaces US3 records and US5 seasons but does not require them to run.
 - **US5 (P5)**: Independently testable via the fake scraper; reuses US1 scraping.
+- **US6 (P6)**: Independently testable with seeded poll/response data (no Gateway); surfaces US2's persisted responses under US1's fixtures but requires neither to run. Post-MVP additive — depends only on the existing `polls`/`poll_responses` tables.
 
 ### Within Each User Story
 
@@ -232,6 +254,7 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 - Phase 2: T006, T009, T010, T011 in parallel after the deletions/schema; T013/T016 in parallel; T012 before T015.
 - Within a story, all `[P]` test tasks run together, then `[P]` implementation tasks on distinct files.
 - Across stories (post-Phase 2): US1, US3, US5 can proceed in parallel by different developers; US2 and US4 layer on once their seam pieces land.
+- Phase 9 (US6): T053 (service read) and T054 (formatters) run in parallel after T052; T055 depends on both, then T056 routes the flag.
 
 ---
 

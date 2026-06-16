@@ -1,12 +1,20 @@
 import { getDatabase } from '../../database/client.js';
 import { SeasonService } from '../../services/season-service.js';
 import { FixtureService } from '../../services/fixture-service.js';
-import { formatFixturesTable, formatFixturesJSON } from '../output/formatters.js';
+import { PollService } from '../../services/poll-service.js';
+import {
+  formatFixturesTable,
+  formatFixturesJSON,
+  formatFixturesWithResponsesTable,
+  formatFixturesWithResponsesJSON,
+} from '../output/formatters.js';
 
 export interface FixturesOptions {
   all?: boolean;
   season?: number;
   json?: boolean;
+  /** US6 (FR-030): list each fixture's recorded poll responses beneath it. View-only, no Gateway. */
+  showResponses?: boolean;
 }
 
 /**
@@ -62,8 +70,17 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
       process.exit(1);
     }
 
-    // Output - pure JSON or formatted table
-    if (options.json) {
+    // Output - pure JSON or formatted table. `--show-responses` (US6) groups each fixture's poll
+    // responses beneath it; the default path is left exactly as it was (AS-5).
+    if (options.showResponses) {
+      const pollService = new PollService(db);
+      const responsesByGame = await pollService.getResponsesForGames(fixtures.map((f) => f.id));
+      if (options.json) {
+        console.log(formatFixturesWithResponsesJSON(season, fixtures, responsesByGame));
+      } else {
+        console.log(formatFixturesWithResponsesTable(season, fixtures, responsesByGame));
+      }
+    } else if (options.json) {
       // Pure JSON output - no decorative characters
       console.log(formatFixturesJSON(season, fixtures));
     } else {

@@ -32,6 +32,9 @@ Suite must include and pass:
 - **US3** stat extraction (pure) + capture window/merge/defaults (fake Gateway `simulateMessage`).
 - **US4** view stats (view-only); persistence across seasons.
 - **US5** season transition (all prior fixtures disappear → new season, old preserved).
+- **US6** poll-response view (`fixtures --show-responses`): per-fixture grouping, canonical-id
+  fallback, "no poll"/"no responses" rendering, `--json` shape, plain `fixtures` output unchanged
+  (real in-memory DB + services, no Gateway).
 
 ## Manual / interactive validation
 
@@ -91,6 +94,18 @@ captain-stats stats --season <n>                # historical stats viewable
 - Simulate the club site dropping all current fixtures and showing new ones (via `sync` against an
   updated fixture source); confirm a **new season** is created, the old season is preserved and
   still viewable via `seasons`/`stats --season`, with no cross-season contamination (SC-006/SC-007).
+
+### US6 — View poll responses (`fixtures --show-responses`, view-only)
+After at least one poll has gathered votes (US2), confirm availability is readable from the CLI.
+```bash
+captain-stats fixtures --show-responses             # current season, responses under each fixture
+captain-stats fixtures --all --show-responses       # include completed fixtures
+captain-stats fixtures --season <n> --show-responses # a previous season
+captain-stats fixtures --show-responses --json      # machine-readable (poll: null | {question, responses})
+```
+Expect each voter's name (canonical id when no name) and choice grouped under the fixture; a
+fixture with no poll shows `(no poll posted)`, a poll with no votes shows `(no responses yet)`,
+and plain `captain-stats fixtures` is unchanged (FR-030, SC-012).
 
 ## Done-when
 - All automated tests green in < 10 s; SC-011 guard passes.

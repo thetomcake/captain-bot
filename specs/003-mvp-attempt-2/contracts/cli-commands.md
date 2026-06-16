@@ -9,7 +9,7 @@ flags: `--config|-c <path>`, `--help|-h`, `--version|-v`, `--json`.
 | Command | Story | Purpose | Key args | Notes |
 |---------|-------|---------|----------|-------|
 | `init` | — | Create config + DB, register team/season | `--team-name`, `--club-url` | REUSE |
-| `fixtures` | US1 | View fixtures (chronological) | `--all`, `--season <n>`, `--json` | REUSE (review) |
+| `fixtures` | US1/US6 | View fixtures (chronological); optionally each fixture's poll responses | `--all`, `--season <n>`, `--show-responses`, `--json` | REUSE (review); `--show-responses` is **NEW** (US6, view-only) |
 | `sync` | US1/US5 | Manual fixture re-scrape; runs transition detection | `--team-id` | reflects updates (FR-003); may create a new season (FR-005) |
 | `stats` | US4 | View stored stats | `--game <id>`, `--season <n>`, `--json` | **NEW** (view-only this MVP) |
 | `seasons` | US4/US5 | List season history | `--json` | **NEW** |
@@ -61,6 +61,18 @@ used by `poll` for **"a poll already exists for the next fixture and `--force` w
 ### `seasons` (NEW)
 - List all seasons (number, date range, current flag); enables selecting a previous season for
   `fixtures`/`stats` (FR-004, SC-006).
+
+### `fixtures --show-responses` (NEW — US6, view-only)
+- **View only**, read from stored data; no WhatsApp/Gateway connection (FR-030). Lists the same
+  fixtures as plain `fixtures` (honours `--all`/`--season <n>`/`--json`), and under each fixture
+  that has a poll prints every recorded response — voter display name (falling back to canonical
+  identity) and selected option (Yes/No/Maybe), grouped under the fixture.
+- A fixture with **no poll** prints `(no poll posted)`; a poll with **no votes** prints
+  `(no responses yet)` — neither is an error or omission (AS-2/AS-3). One response per canonical
+  identity (no double-counting, FR-013/SC-008).
+- Omitting the flag leaves `fixtures` output unchanged (AS-5). `--json`: each fixture object gains a
+  `poll` field — `null`, or `{ question, responses: [{ name, choice }] }`. Exit codes unchanged
+  (`0` success · `1` no fixtures · `3` error).
 
 ## Output validation (per Constitution II "minimal output validation")
 One structural test per output type (human + `--json`); no formatting-regex assertions.
