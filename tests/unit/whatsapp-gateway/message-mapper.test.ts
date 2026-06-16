@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  isNewInbound,
+  isDispatchable,
   extractText,
   normalizeTimestamp,
   mapIncomingMessage,
@@ -38,27 +38,71 @@ function makeMessage(overrides: {
 const PN = '447700900123@s.whatsapp.net';
 const LID = '111222333@lid';
 
-describe('isNewInbound (live-vs-history; the linked account is a participant — FR-014/FR-015)', () => {
-  it('reports a genuine notify message from another person', () => {
-    expect(isNewInbound('notify', makeMessage({ fromMe: false }))).toBe(true);
+describe('isDispatchable (type-agnostic dispatch decision — contract C1, FR-011)', () => {
+  // The decision rests on two gates only — the single authorization chokepoint (FR-005) and
+  // the at-most-once claim (FR-003) — and is deliberately blind to the upsert `type`, so a
+  // recovered `append` item dispatches exactly as the equivalent live `notify` item would.
+
+  it('dispatches an authorized, unclaimed item (both gates pass — G1)', () => {
+    expect(isDispatchable(true, () => true)).toBe(true);
   });
 
-  it('reports the operator’s OWN manual message (notify + fromMe) — they are a participant', () => {
-    // The bot is linked to the operator's own account; messages they type on their phone
-    // arrive as notify + fromMe and ARE live inbound activity. Dispatch is gated on `type`,
-    // not `fromMe`.
-    expect(isNewInbound('notify', makeMessage({ fromMe: true }))).toBe(true);
+  it('drops an unauthorized item without consuming a claim (authorization gate — G2)', () => {
+    // Order matters: authorization fails first, so the side-effecting claim is never spent on
+    // a cross-chat item that will be dropped anyway (contract C1 ordering, FR-005/SC-004).
+    let claimCalls = 0;
+    const claim = () => {
+      claimCalls += 1;
+      return true;
+    };
+    expect(isDispatchable(false, claim)).toBe(false);
+    expect(claimCalls).toBe(0);
   });
 
-  it('does NOT report an append message (history / our own programmatic-send echo)', () => {
-    expect(isNewInbound('append', makeMessage({ fromMe: false }))).toBe(false);
+  it('suppresses an authorized item whose claim fails — already seen (claim gate — G3)', () => {
+    // A failed claim means an own-send echo (FR-004) or a re-delivery (FR-003) — at-most-once.
+    expect(isDispatchable(true, () => false)).toBe(false);
   });
 
-  it('does NOT report an append message even when fromMe (history backfill of own activity)', () => {
-    // The gateway's own programmatic sends and resync history arrive as `append`; they must
-    // stay excluded regardless of fromMe. This guards against a refactor re-introducing a
-    // fromMe-only gate that would resurrect history.
-    expect(isNewInbound('append', makeMessage({ fromMe: true }))).toBe(false);
+  it('is independent of the upsert type — equal (authorized, claim) ⇒ equal result (G4)', () => {
+    // `isDispatchable` takes no `type`: by construction the live/not-live tag cannot affect
+    // dispatch. Whether the item arrived as `notify` or `append`, equal inputs yield equal
+    // outputs — this is what relaxes the old notify-only gate (FR-011).
+    for (const _type of ['notify', 'append'] as const) {
+      expect(isDispatchable(true, () => true)).toBe(true);
+      expect(isDispatchable(false, () => true)).toBe(false);
+      expect(isDispatchable(true, () => false)).toBe(false);
+    }
+  });
+});
+
+describe('recovered (append) item eligibility & routing (US1, contract C1 G1/G4)', () => {
+  // A vote cast/changed during an outage is re-delivered on reconnect as an `append` item.
+  // The pure dispatch decision admits it exactly as the live `notify` equivalent, and the
+  // poll-vote discriminator the gateway routes on (`message.pollUpdateMessage`) does not look
+  // at the upsert type — so a recovered poll-update routes to the poll path (FR-001).
+
+  // The exact branch `handleMessagesUpsert` uses to send an item to the poll-vote path.
+  const isPollVote = (msg: WAMessage): boolean => msg.message?.pollUpdateMessage != null;
+
+  it('a recovered authorized poll-update item is dispatchable and routes to the poll path (G1)', () => {
+    const recovered = makeMessage({
+      message: { pollUpdateMessage: { vote: {} } } as unknown as WAMessage['message'],
+    });
+    // authorized chat + unclaimed (first sighting) ⇒ both gates pass.
+    expect(isDispatchable(true, () => true)).toBe(true);
+    // …and it is identified as a poll vote, so it routes to onPollVote, not onMessage.
+    expect(isPollVote(recovered)).toBe(true);
+  });
+
+  it('eligibility does not depend on the item being live — append behaves as notify (G4)', () => {
+    // The recovered item carries no `type` into the decision; an equivalent live poll-update
+    // yields the same dispatchable result. The live/not-live tag no longer affects dispatch.
+    const live = makeMessage({
+      message: { pollUpdateMessage: { vote: {} } } as unknown as WAMessage['message'],
+    });
+    expect(isDispatchable(true, () => true)).toBe(true);
+    expect(isPollVote(live)).toBe(true);
   });
 });
 

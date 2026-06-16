@@ -19,22 +19,27 @@ import type { WAMessage } from '@whiskeysockets/baileys';
 import type { IncomingMessage } from '../types.js';
 import type { IdentityResolver } from '../identity/identity-resolver.js';
 
-/** The two upsert kinds Baileys emits (official docs: notify = new, append = history/echo). */
-export type UpsertType = 'notify' | 'append';
-
 /**
- * True for a LIVE inbound message: any `'notify'` item (FR-014/FR-015).
+ * Decide whether an inbound upsert item should be dispatched — the type-agnostic dispatch
+ * rule that supersedes the former notify-only gate (contract C1, FR-011).
  *
- * Dispatch is gated on the upsert `type`, NOT on `fromMe`. The bot is linked to the
- * operator's own WhatsApp account, so the operator is a **participant**: messages they type
- * in the group from their own phone arrive as `'notify'` + `fromMe: true` and ARE genuine
- * new inbound activity. The gateway's own *programmatic* sends (`sendMessage`/`sendPoll`) and
- * history backfill on resync arrive as `'append'`, so they remain excluded here — that, not a
- * `fromMe` check, is what filters out "echoes of its own activity" (FR-015). `mapIncomingMessage`
- * still records `fromMe` faithfully so consumers can branch on who sent it.
+ * Two gates, evaluated in order; the first to fail stops dispatch:
+ *   1. `authorized` — the single authorization chokepoint (`groupFilter.isAuthorized`,
+ *      FR-005/SC-004). A cross-chat item is dropped here.
+ *   2. `claim()` — the at-most-once guard (`messageStore.claimOnce`, FR-003). A failed claim
+ *      means the item was already seen: an own-send echo (FR-004) or a re-delivery (FR-003).
+ *
+ * The decision deliberately ignores the Baileys upsert `type`, so a recovered `append` item
+ * dispatches exactly as the equivalent live `notify` item would (G1/G4). `claim` is
+ * side-effecting (test-and-set), so it is only invoked once authorization passes — an
+ * unauthorized item must not consume a claim. `type` MAY be logged by the caller for debugging
+ * but MUST NOT influence this result.
  */
-export function isNewInbound(type: UpsertType, _msg: WAMessage): boolean {
-  return type === 'notify';
+export function isDispatchable(authorized: boolean, claim: () => boolean): boolean {
+  if (!authorized) {
+    return false;
+  }
+  return claim();
 }
 
 /**

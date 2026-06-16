@@ -108,3 +108,38 @@ describe('MessageStore.claimOnce (test-and-set; backs at-most-once dispatch, FR-
     expect(store.claimOnce(messageStoreKey(GROUP, 'M1'))).toBe(true);
   });
 });
+
+describe('own-send claim semantics (echo suppression — contract C2, FR-004/FR-006/US3)', () => {
+  // At send time the Gateway pre-populates the at-most-once guard for its own (group, id)
+  // (T005, right after messageStore.set(sent)). The dispatch decision (C1.2) then suppresses
+  // the echo when it arrives — live or on reconnect. These tests pin the claimOnce semantics
+  // that the own-send claim relies on, framed as the C2 guarantees.
+
+  it('suppresses the Gateway’s own echo: re-claiming the sent (group, id) returns false (G5)', () => {
+    const store = new MessageStore();
+    // Send time: the Gateway claims its own programmatic send.
+    expect(store.claimOnce(messageStoreKey(GROUP, 'SENT1'))).toBe(true);
+    // The echo of that same send re-claims the SAME key → suppressed, not dispatched.
+    expect(store.claimOnce(messageStoreKey(GROUP, 'SENT1'))).toBe(false);
+  });
+
+  it('dispatches a manual operator send: an id the Gateway never claimed → true (G6, FR-006)', () => {
+    const store = new MessageStore();
+    // The Gateway claimed its own programmatic send…
+    store.claimOnce(messageStoreKey(GROUP, 'SENT1'));
+    // …but a message the operator typed on their linked phone has an id the Gateway never
+    // claimed, so it claims fresh and is dispatched as genuine inbound activity (never gated
+    // on fromMe — keyed to the Gateway's own send id).
+    expect(store.claimOnce(messageStoreKey(GROUP, 'MANUAL1'))).toBe(true);
+  });
+
+  it('keys the claim by chat (remoteJid + id), so sender PN/LID addressing is irrelevant (G7)', () => {
+    // messageStoreKey composes only (remoteJid, id) — the sender participant never enters the
+    // key — so the echo matches the send regardless of how the sender is addressed (PN vs LID).
+    expect(messageStoreKey(GROUP, 'SENT1')).toBe(`${GROUP}:SENT1`);
+    const store = new MessageStore();
+    expect(store.claimOnce(messageStoreKey(GROUP, 'SENT1'))).toBe(true);
+    // Same chat + id, whatever the echo's sender addressing → same key → suppressed.
+    expect(store.claimOnce(messageStoreKey(GROUP, 'SENT1'))).toBe(false);
+  });
+});

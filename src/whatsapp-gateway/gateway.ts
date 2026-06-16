@@ -47,7 +47,11 @@ import { classifyDeleteError } from './messages/delete-classifier.js';
 import { GroupFilter } from './groups/group-filter.js';
 import { IdentityResolver } from './identity/identity-resolver.js';
 import { RateLimiter } from './rate-limiter.js';
-import { isNewInbound, mapIncomingMessage, normalizeTimestamp } from './messages/message-mapper.js';
+import {
+  isDispatchable,
+  mapIncomingMessage,
+  normalizeTimestamp,
+} from './messages/message-mapper.js';
 import {
   reduceConnection,
   initialConnectionState,
@@ -246,6 +250,9 @@ export class WhatsAppGateway {
     }
     // Cache the outbound message for getMessage send-retries (§2).
     this.messageStore.set(sent);
+    // Pre-populate the at-most-once guard for our own send so its later echo (live or on
+    // reconnect) fails claimOnce and is suppressed by the dispatch decision (FR-004, contract C2).
+    this.messageStore.claimOnce(messageStoreKey(groupId, sent.key.id));
     return { id: sent.key.id, groupId };
   }
 
@@ -331,6 +338,9 @@ export class WhatsAppGateway {
     const pollId = sent.key.id;
     // Cache the poll-creation message (backs getMessage + the in-session poll-secret fast-path).
     this.messageStore.set(sent);
+    // Pre-populate the at-most-once guard for our own poll send so its later echo (live or on
+    // reconnect) fails claimOnce and is suppressed by the dispatch decision (FR-004, contract C2).
+    this.messageStore.claimOnce(messageStoreKey(groupId, pollId));
     const secretBytes = toBytes(secret);
     // Seed the in-session secret cache so our own poll's votes decrypt with no consumer round-trip.
     this.resolvedKeysets.set(messageStoreKey(groupId, pollId), {
@@ -425,12 +435,17 @@ export class WhatsAppGateway {
   }
 
   /**
-   * Handle a `messages.upsert` batch (US2, FR-014/FR-015/FR-017). Per the official Baileys
+   * Handle a `messages.upsert` batch (US2, FR-001/FR-002/FR-011/FR-017). Per the official Baileys
    * docs the payload is `{ type: 'notify' | 'append', messages: WAMessage[] }` and the array
    * must be iterated in full. Every message (any type) is cached so `getMessage` can serve
-   * send-retries and the later poll-secret fast-path (§2/§7); only live `'notify'` events
-   * from an authorized group are mapped and dispatched (including the operator's own manual
-   * messages — the linked account is a participant; `'append'` history/echo is excluded).
+   * send-retries and the later poll-secret fast-path (§2/§7).
+   *
+   * Dispatch no longer gates on the live/not-live `type` (FR-011): a recovered `append` item
+   * (offline catch-up on reconnect) is dispatched exactly as the equivalent live `notify` item
+   * would be. The decision is the pure {@link isDispatchable} — authorization chokepoint then the
+   * at-most-once claim — and `type` is retained only as a debug log field. Own programmatic-send
+   * echoes are now suppressed not by a notify-only gate but by the send-time own-send claim
+   * (FR-004), which makes their echo fail `claimOnce` here.
    */
   private handleMessagesUpsert(upsert: { messages: WAMessage[]; type: MessageUpsertType }): void {
     const { messages, type } = upsert;
@@ -444,62 +459,48 @@ export class WhatsAppGateway {
 
       const remoteJid = msg.key?.remoteJid ?? undefined;
       const fromMe = msg.key?.fromMe === true;
-      const newInbound = isNewInbound(type, msg);
       const authorized = this.groupFilter.isAuthorized(remoteJid);
+      const id = msg.key?.id;
       this.config.logger.debug('WhatsAppGateway: upsert item', {
-        id: msg.key?.id,
+        id,
         remoteJid,
         participant: msg.key?.participant ?? undefined,
         fromMe,
         type,
-        newInbound,
         authorized,
         isPollVote: msg.message?.pollUpdateMessage != null,
       });
 
-      // SINGLE authorization chokepoint (FR-017/SC-004): only a live ('notify') message from an
-      // authorized chat proceeds past here. EVERY downstream path — text dispatch AND poll-vote
-      // handling — trusts this gate, so the zero-leakage invariant is enforced in exactly one
-      // place. A poll vote always arrives in the poll's own chat, so `msg.key.remoteJid` is that
-      // group (handlePollUpdate still derives the PollRef's groupId from the poll-creation key,
-      // per research §11, but no longer re-filters).
-      if (!newInbound) {
-        this.config.logger.debug('WhatsAppGateway: skipping non-live item', {
-          reason: `type=${type} (only 'notify' is live; 'append' = history / own programmatic-send echo)`,
-        });
-        continue;
-      }
-      if (!authorized) {
-        // cross-chat leakage prevention (FR-017): ignore DMs/other groups/broadcast. The most
-        // common cause of "listen prints nothing" is a configured authorizedGroups JID that
-        // does not exactly match this remoteJid — both are logged above to spot the mismatch.
-        this.config.logger.debug('WhatsAppGateway: dropping message from unauthorized chat', {
+      // Per-item dispatch decision (contract C1, FR-011). Two gates, in order:
+      //   1. authorization — the SINGLE chokepoint (FR-005/SC-004). EVERY downstream path (text
+      //      dispatch AND poll-vote handling) trusts this gate, so zero cross-chat leakage is
+      //      enforced in exactly one place. A poll vote always arrives in the poll's own chat,
+      //      so `msg.key.remoteJid` is that group (handlePollUpdate still derives the PollRef's
+      //      groupId from the poll-creation key, per research §11, but no longer re-filters).
+      //   2. at-most-once claim (FR-003/FR-034) — a re-delivered or own-send-echoed (remoteJid,
+      //      id) is suppressed. The canonical identity is (remoteJid, id); `id` alone is only
+      //      unique within a chat, so we dedup on the same composite key the store uses
+      //      everywhere else. Claiming here covers BOTH downstream paths. Unkeyed messages are
+      //      extremely rare and can't be deduped, so they dispatch as before.
+      // The decision is deliberately blind to `type`, so recovered `append` catch-up dispatches
+      // exactly as the equivalent live `notify` item would (G1/G4).
+      const claim = (): boolean =>
+        id == null ? true : this.messageStore.claimOnce(messageStoreKey(remoteJid, id));
+      if (!isDispatchable(authorized, claim)) {
+        this.config.logger.debug('WhatsAppGateway: item not dispatchable', {
           remoteJid,
-          authorizedGroups: this.config.authorizedGroups,
+          id,
+          // authorization is evaluated first, so a true `authorized` with a non-dispatchable
+          // verdict means the claim failed (own-send echo or re-delivery).
+          reason: authorized
+            ? 'already claimed (own-send echo or re-delivery — at-most-once, FR-003/FR-004)'
+            : 'unauthorized chat (cross-chat leakage prevention, FR-005)',
+          authorizedGroups: authorized ? undefined : this.config.authorizedGroups,
         });
         continue;
       }
 
-      // At-most-once dispatch (FR-034). A single live message can be re-delivered (e.g. a
-      // decrypt-retry forcing session re-establishment); without this guard it would be
-      // dispatched twice — double poll, tripped `polls.game_id` UNIQUE. The canonical message
-      // identity is (remoteJid, id) — `id` alone is only unique within a chat — so we dedup on
-      // the same composite key the store uses everywhere else. Claiming here covers BOTH
-      // downstream paths (poll-vote and text). Unkeyed messages are extremely rare and can't be
-      // deduped, so they fall through and dispatch as before.
-      const id = msg.key?.id;
-      if (id) {
-        const messageKey = messageStoreKey(remoteJid, id);
-        if (!this.messageStore.claimOnce(messageKey)) {
-          this.config.logger.debug('WhatsAppGateway: dropping re-delivered live message', {
-            remoteJid,
-            id,
-          });
-          continue;
-        }
-      }
-
-      // Route an authorized, live message. Poll votes decrypt → onPollVote (never onMessage
+      // Route an authorized, dispatchable item. Poll votes decrypt → onPollVote (never onMessage
       // text dispatch, US3/FR-022); everything else maps → onMessage.
       if (msg.message?.pollUpdateMessage) {
         void this.handlePollUpdate(msg);

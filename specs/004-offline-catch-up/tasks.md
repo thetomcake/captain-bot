@@ -32,7 +32,7 @@ Single-project library. All paths are repo-root-relative under `src/whatsapp-gat
 
 **Purpose**: Establish a known-green baseline before changing dispatch behaviour.
 
-- [ ] T001 Run `npm test` and confirm the Gateway unit suite (`tests/unit/whatsapp-gateway/*`) is green; record the baseline so behavioural changes in later phases are attributable.
+- [X] T001 Run `npm test` and confirm the Gateway unit suite (`tests/unit/whatsapp-gateway/*`) is green; record the baseline so behavioural changes in later phases are attributable.
 
 ---
 
@@ -44,8 +44,8 @@ behaviour, so the build stays green.
 
 **⚠️ CRITICAL**: No user story work begins until this phase is complete.
 
-- [ ] T002 Write failing unit tests for the pure dispatch-eligibility decision in `tests/unit/whatsapp-gateway/message-mapper.test.ts`: type-independence (G4 — same result for `type='notify'` and `type='append'` given equal inputs), authorization gate (G2 — unauthorized → not dispatchable), and claim gate (G3 — a failed `claim()` → not dispatchable). These replace the obsolete `isNewInbound` notify-only assertions.
-- [ ] T003 Add the pure `isDispatchable(authorized, claim)` decision function (type-agnostic, per contract C1) in `src/whatsapp-gateway/messages/message-mapper.ts` **alongside** the existing `isNewInbound` (do not remove `isNewInbound` yet — `gateway.ts` still references it until T008). Make T002 pass.
+- [X] T002 Write failing unit tests for the pure dispatch-eligibility decision in `tests/unit/whatsapp-gateway/message-mapper.test.ts`: type-independence (G4 — same result for `type='notify'` and `type='append'` given equal inputs), authorization gate (G2 — unauthorized → not dispatchable), and claim gate (G3 — a failed `claim()` → not dispatchable). These replace the obsolete `isNewInbound` notify-only assertions.
+- [X] T003 Add the pure `isDispatchable(authorized, claim)` decision function (type-agnostic, per contract C1) in `src/whatsapp-gateway/messages/message-mapper.ts` **alongside** the existing `isNewInbound` (do not remove `isNewInbound` yet — `gateway.ts` still references it until T008). Make T002 pass.
 
 **Checkpoint**: The dispatch decision is a tested pure unit; `gateway.ts` is unchanged and the suite is green.
 
@@ -63,11 +63,11 @@ accepted.
 
 ### Tests for User Story 3
 
-- [ ] T004 [P] [US3] Write failing unit tests in `tests/unit/whatsapp-gateway/message-store.test.ts` for own-send-claim semantics (contract C2): after `claimOnce(messageStoreKey(group, id))`, a re-claim of the **same** key → `false` (echo suppressed, G5); an **unclaimed** id → `true` (manual operator send dispatched, G6, FR-006); the key is chat-scoped via `messageStoreKey` so sender PN/LID addressing is irrelevant (G7).
+- [X] T004 [P] [US3] Write failing unit tests in `tests/unit/whatsapp-gateway/message-store.test.ts` for own-send-claim semantics (contract C2): after `claimOnce(messageStoreKey(group, id))`, a re-claim of the **same** key → `false` (echo suppressed, G5); an **unclaimed** id → `true` (manual operator send dispatched, G6, FR-006); the key is chat-scoped via `messageStoreKey` so sender PN/LID addressing is irrelevant (G7).
 
 ### Implementation for User Story 3
 
-- [ ] T005 [US3] Implement the own-send claim in `src/whatsapp-gateway/gateway.ts`: in `sendMessage` (immediately after `this.messageStore.set(sent)`, ~line 248) and in `sendPoll` (immediately after `this.messageStore.set(sent)`, ~line 333), call `this.messageStore.claimOnce(messageStoreKey(groupId, sent.key.id))` (FR-004, contract C2). Make T004 pass; full suite stays green.
+- [X] T005 [US3] Implement the own-send claim in `src/whatsapp-gateway/gateway.ts`: in `sendMessage` (immediately after `this.messageStore.set(sent)`, ~line 248) and in `sendPoll` (immediately after `this.messageStore.set(sent)`, ~line 333), call `this.messageStore.claimOnce(messageStoreKey(groupId, sent.key.id))` (FR-004, contract C2). Make T004 pass; full suite stays green.
 
 **Checkpoint**: Own-send echoes are claimed at send time. The gate has NOT yet been relaxed, so behaviour is unchanged for the consumer — but the precondition for relaxation now holds.
 
@@ -84,12 +84,12 @@ another account, reconnect, and confirm the tally matches a never-offline run (q
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Write failing unit tests in `tests/unit/whatsapp-gateway/message-mapper.test.ts` for recovered-item eligibility/routing: a recovered (`type='append'`) authorized poll-update item is **dispatchable** and is identified as a poll vote (routes to the poll path); confirm `type` no longer affects the outcome (G1/G4).
+- [X] T006 [P] [US1] Write failing unit tests in `tests/unit/whatsapp-gateway/message-mapper.test.ts` for recovered-item eligibility/routing: a recovered (`type='append'`) authorized poll-update item is **dispatchable** and is identified as a poll vote (routes to the poll path); confirm `type` no longer affects the outcome (G1/G4).
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Rewire `handleMessagesUpsert` in `src/whatsapp-gateway/gateway.ts` to use `isDispatchable(...)` and **remove the notify-only gate** (the `if (!newInbound)` block, ~lines 466-471) (FR-001/FR-011). Preserve the ordering: authorization chokepoint → `claimOnce` → poll/text routing; keep `type` only as a debug log field. Then remove the now-unused `isNewInbound` from `message-mapper.ts` and its obsolete test references (FR-011).
-- [ ] T008 [US1] Confirm recovered-vote last-write-wins and withdrawal-as-empty-selection are covered by `tests/unit/whatsapp-gateway/poll-tally.test.ts`; add a "changed selection replaces prior" and a "withdrawal clears" case if not already present (FR-008). No production change expected (recovered votes reuse the live decrypt/aggregate path, research Decision 6).
+- [X] T007 [US1] Rewire `handleMessagesUpsert` in `src/whatsapp-gateway/gateway.ts` to use `isDispatchable(...)` and **remove the notify-only gate** (the `if (!newInbound)` block, ~lines 466-471) (FR-001/FR-011). Preserve the ordering: authorization chokepoint → `claimOnce` → poll/text routing; keep `type` only as a debug log field. Then remove the now-unused `isNewInbound` from `message-mapper.ts` and its obsolete test references (FR-011).
+- [X] T008 [US1] Confirm recovered-vote last-write-wins and withdrawal-as-empty-selection are covered by `tests/unit/whatsapp-gateway/poll-tally.test.ts`; add a "changed selection replaces prior" and a "withdrawal clears" case if not already present (FR-008). No production change expected (recovered votes reuse the live decrypt/aggregate path, research Decision 6). **Already covered** — `poll-tally.test.ts` "applies last-write-per-voter: a later selection replaces the earlier one" (changed vote) and "treats an empty selection as a withdrawal that removes the voter" (withdrawal); no new test or production code required.
 
 **Checkpoint**: Recovered `append` poll votes flow through to `onPollVote` exactly once and apply correctly. MVP (votes fix — the reported defect) is functional.
 
