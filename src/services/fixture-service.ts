@@ -1,9 +1,12 @@
 import { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { eq, and, asc, gte } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
-import { Game, GameStatus } from '../types/entities.js';
+import { Game, GameStatus, Season } from '../types/entities.js';
 import { SeasonService } from './season-service.js';
 import { IFixtureScraper, DefaultFixtureScraper } from '../scraping/fixture-scraper.js';
+import { logger } from '../utils/logger.js';
+
+type Team = typeof schema.teams.$inferSelect;
 
 export interface FixtureChange {
   type: 'added' | 'updated' | 'removed';
@@ -16,6 +19,15 @@ export interface FixtureChanges {
   updated: FixtureChange[];
   removed: Game[];
   rescheduled: FixtureChange[];
+}
+
+export interface SyncResult {
+  /** Fixtures stored for the (possibly new) current season after the sync. */
+  games: Game[];
+  /** True when this sync detected a season transition and created a new season (FR-005). */
+  seasonTransition: boolean;
+  /** The new season's number when a transition occurred. */
+  newSeasonNumber?: number;
 }
 
 export class FixtureService {
@@ -39,16 +51,7 @@ export class FixtureService {
     teamId: number,
     _options: { forceRefresh?: boolean} = {}
   ): Promise<Game[]> {
-    // Get team
-    const [team] = await this.db
-      .select()
-      .from(schema.teams)
-      .where(eq(schema.teams.id, teamId))
-      .limit(1);
-
-    if (!team) {
-      throw new Error(`Team not found: ${teamId}`);
-    }
+    const team = await this.getTeam(teamId);
 
     // Get or create current season
     const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
@@ -57,6 +60,18 @@ export class FixtureService {
     const html = await this.scraper.fetchHtml(team.clubUrl);
     const scrapedFixtures = this.scraper.parseFixtures(html);
 
+    return this.persistScrapedFixtures(team, season, scrapedFixtures);
+  }
+
+  /**
+   * Persist a set of already-scraped fixtures into the given season (insert new,
+   * update changed venue/status), then advance the season start date.
+   */
+  private async persistScrapedFixtures(
+    team: Team,
+    season: Season,
+    scrapedFixtures: { date: string; time: string; opponent: string; venue: string; status: GameStatus }[]
+  ): Promise<Game[]> {
     // Convert scraped fixtures to games and store
     const games: Game[] = [];
 
@@ -128,10 +143,51 @@ export class FixtureService {
   }
 
   /**
-   * Sync fixtures (alias for fetchFixtures with refresh)
+   * Sync fixtures from the club website, detecting a season transition along the
+   * way (FR-005). Scrapes once, and if every previously scraped fixture has
+   * disappeared, ends the current season and creates the next before persisting
+   * the new fixtures into it — previous-season data is left untouched (SC-006/SC-007).
    */
-  async syncFixtures(teamId: number): Promise<Game[]> {
-    return this.fetchFixtures(teamId, { forceRefresh: true });
+  async syncFixtures(teamId: number): Promise<SyncResult> {
+    const team = await this.getTeam(teamId);
+
+    const html = await this.scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = this.scraper.parseFixtures(html);
+
+    const seasonTransition = await this.seasonService.shouldCreateNewSeason(
+      teamId,
+      scrapedFixtures
+    );
+
+    let newSeasonNumber: number | undefined;
+    if (seasonTransition) {
+      const newSeason = await this.seasonService.createNewSeason(teamId);
+      newSeasonNumber = newSeason.seasonNumber;
+      logger.info(
+        `Season transition detected — old fixtures gone, created season ${newSeason.seasonNumber}`,
+        { teamId }
+      );
+    }
+
+    // Re-resolve the current season (the new one when a transition just happened).
+    const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
+    const games = await this.persistScrapedFixtures(team, season, scrapedFixtures);
+
+    return { games, seasonTransition, newSeasonNumber };
+  }
+
+  private async getTeam(teamId: number): Promise<Team> {
+    const [team] = await this.db
+      .select()
+      .from(schema.teams)
+      .where(eq(schema.teams.id, teamId))
+      .limit(1);
+
+    if (!team) {
+      throw new Error(`Team not found: ${teamId}`);
+    }
+
+    return team;
   }
 
   /**

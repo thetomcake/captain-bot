@@ -20,10 +20,15 @@ export async function syncCommand(options: SyncOptions = {}): Promise<void> {
 
     console.log('Syncing fixtures from club website...');
 
-    // Fetch and sync fixtures
-    const fixtures = await fixtureService.syncFixtures(teamId);
+    // Fetch and sync fixtures (also detects season transitions, FR-005)
+    const result = await fixtureService.syncFixtures(teamId);
 
-    console.log(`✓ Synced ${fixtures.length} fixtures`);
+    if (result.seasonTransition) {
+      console.log(
+        `✓ Season transition detected — started season ${result.newSeasonNumber} (previous season preserved)`
+      );
+    }
+    console.log(`✓ Synced ${result.games.length} fixtures`);
 
     process.exit(0);
   } catch (error) {
