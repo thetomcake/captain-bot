@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  formatPollQuestion,
-  getPollOptions,
-  buildPollSpec,
-} from '#src/whatsapp/poll-presenter.js';
+import { formatPollQuestion, getPollOptions, buildPollSpec } from '#src/whatsapp/poll-presenter.js';
 import type { Game } from '#src/types/entities.js';
 
 /** Pure poll-presenter tests (T023) — formatting only, no WhatsApp / DB coupling. */
@@ -21,11 +17,14 @@ describe('poll-presenter', () => {
   };
 
   describe('formatPollQuestion', () => {
-    it('includes the opponent and a human date, and reads as a question', () => {
-      const question = formatPollQuestion(game);
-      expect(question).toContain('Red Devils');
-      expect(question).toContain('22');
-      expect(question).toMatch(/\?$/);
+    it('formats as `<date> - <time> vs <opponent>`', () => {
+      // gameDate is Mon 22 June 2026, 19:00 local → "Mon 22 Jun - 7PM vs Red Devils".
+      expect(formatPollQuestion(game)).toBe('Mon 22 Jun - 7PM vs Red Devils');
+    });
+
+    it('renders non-on-the-hour kickoffs with minutes', () => {
+      const evening = { ...game, gameDate: new Date(2026, 5, 22, 19, 30) };
+      expect(formatPollQuestion(evening)).toBe('Mon 22 Jun - 7:30PM vs Red Devils');
     });
   });
 
