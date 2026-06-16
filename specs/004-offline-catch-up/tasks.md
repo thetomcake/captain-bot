@@ -107,11 +107,11 @@ dispatched, each once (quickstart §C/§E).
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Write failing unit tests in `tests/unit/whatsapp-gateway/message-mapper.test.ts`: a recovered (`type='append'`) authorized **text** item is dispatchable and maps to `onMessage` (FR-001/FR-002, G1); a recovered `append` item from an **unauthorized** chat is dropped (FR-005, G2). (Same file as T006 — not parallel with it.)
+- [X] T009 [P] [US2] Write failing unit tests in `tests/unit/whatsapp-gateway/message-mapper.test.ts`: a recovered (`type='append'`) authorized **text** item is dispatchable and maps to `onMessage` (FR-001/FR-002, G1); a recovered `append` item from an **unauthorized** chat is dropped (FR-005, G2). (Same file as T006 — not parallel with it.)
 
 ### Implementation for User Story 2
 
-- [ ] T010 [US2] Verify the Phase-4 relaxation dispatches recovered authorized text messages to `onMessage` exactly once (claim guard, SC-002/SC-005) and rejects unauthorized chats (SC-004). Expect **no new production code** beyond T007; if a gap is found (e.g. a path that still consulted `type`), fix it in `src/whatsapp-gateway/gateway.ts`. Depends on T007.
+- [X] T010 [US2] Verify the Phase-4 relaxation dispatches recovered authorized text messages to `onMessage` exactly once (claim guard, SC-002/SC-005) and rejects unauthorized chats (SC-004). Expect **no new production code** beyond T007; if a gap is found (e.g. a path that still consulted `type`), fix it in `src/whatsapp-gateway/gateway.ts`. Depends on T007. **Verified** — `handleMessagesUpsert` (`gateway.ts:489-517`) gates on `isDispatchable(authorized, claim)`, maps non-poll items via `mapIncomingMessage` → `dispatchMessage` → `onMessage`, the `claimOnce` guard enforces at-most-once, and unauthorized chats drop at the authorization gate. No path consults `type` for dispatch. No production change required.
 
 **Checkpoint**: Both votes (US1) and messages (US2) are recovered on reconnect; cross-chat isolation and at-most-once hold.
 
@@ -119,9 +119,9 @@ dispatched, each once (quickstart §C/§E).
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T011 [P] Update the stale comments that describe the old rule to the relaxed dispatch rule: the `message-mapper.ts` header (lines ~6-8, "'append' = history/echo → NOT new inbound"), the `gateway.ts` `handleMessagesUpsert` doc/skip comments (~lines 427-433, 460-471), and any matching note in `src/whatsapp-gateway/README.md`.
-- [ ] T012 Run the full suite (`npm test`); confirm green within the project time budget and that the claim/dedup tests assert at-most-once across catch-up (SC-005). Confirm no MVP file imports Baileys (existing SC-011 guard still passes).
-- [ ] T013 Execute `specs/004-offline-catch-up/quickstart.md` manual validation (§B recovered votes, §C recovered messages, §D own-send echo + manual-send control, §E cross-chat isolation, §F clean reconnect unaffected) against a live test session; record outcomes.
+- [X] T011 [P] Update the stale comments that describe the old rule to the relaxed dispatch rule: the `message-mapper.ts` header (lines ~6-8, "'append' = history/echo → NOT new inbound"), the `gateway.ts` `handleMessagesUpsert` doc/skip comments (~lines 427-433, 460-471), and any matching note in `src/whatsapp-gateway/README.md`.
+- [X] T012 Run the full suite (`npm test`); confirm green within the project time budget and that the claim/dedup tests assert at-most-once across catch-up (SC-005). Confirm no MVP file imports Baileys (existing SC-011 guard still passes). **Done** — 236/236 tests pass in ~6.2s; `tests/unit/whatsapp-gateway/message-store.test.ts` asserts the own-send claim + at-most-once dedup; `tests/integration/whatsapp/no-baileys-import.test.ts` (SC-011) still passes.
+- [ ] T013 Execute `specs/004-offline-catch-up/quickstart.md` manual validation (§B recovered votes, §C recovered messages, §D own-send echo + manual-send control, §E cross-chat isolation, §F clean reconnect unaffected) against a live test session; record outcomes. **REQUIRES OPERATOR** — needs a live WhatsApp-paired session (interactive QR pairing + reconnect), which is the ratified spec-002 manual-exclusion path and cannot be run from the automated harness. Awaiting operator execution.
 
 ---
 

@@ -1,11 +1,14 @@
 // PURE message mapping: translate a Baileys WAMessage into the public IncomingMessage,
-// and decide whether an upsert item is genuine new inbound (FR-014/FR-015).
+// and decide whether an upsert item should be dispatched (the type-agnostic rule, FR-011).
 //
 // Verified against the official Baileys docs (baileys.wiki — "Receiving Updates" and
 // "Handling Messages") and research.md §2:
 //   • messages.upsert delivers { type: 'notify' | 'append', messages: WAMessage[] }.
-//     'notify' = newly received → route to the consumer; 'append' = history / echo
-//     (our own sent message/poll comes back as 'append') → NOT new inbound (FR-015).
+//     'notify' = live, 'append' = offline catch-up re-delivered on reconnect (and own-send
+//     echoes). Dispatch NO LONGER gates on this tag (FR-011): a recovered `append` item is
+//     dispatched exactly as the equivalent live `notify` would be. The decision is the pure
+//     {@link isDispatchable} below — authorization then the at-most-once claim — and own-send
+//     echoes are suppressed by the send-time own-send claim, not by the upsert type (FR-004).
 //   • Text lives in `message.conversation` or `message.extendedTextMessage.text`.
 //   • Sender is `key.participant` in a group (with `key.participantAlt` as the LID/PN
 //     counterpart); `messageTimestamp` is seconds (may be a Long).

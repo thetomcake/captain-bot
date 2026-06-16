@@ -118,7 +118,7 @@ break the gateway's internal loop.
 |--------|-------|
 | `onQR(handler: (qr: string) => void)` | When pairing is needed — render the string as a QR code (e.g. `qrcode-terminal`). |
 | `onConnectionChange(handler: (status: ConnectionStatus) => void)` | On every lifecycle transition. |
-| `onMessage(handler: (msg: IncomingMessage) => void \| Promise<void>)` | For every **live** (`notify`) message in an authorized group — **including the operator's own manual messages** (the linked account is a participant, so `fromMe` may be `true`). Never for history backfill / the Gateway's own programmatic-send echoes (`append`) or other chats. Branch on `msg.fromMe` if you must treat your own messages differently. |
+| `onMessage(handler: (msg: IncomingMessage) => void \| Promise<void>)` | For every authorized-group message — live **and** offline catch-up re-delivered on reconnect (`append`), each at most once — **including the operator's own manual messages** (the linked account is a participant, so `fromMe` may be `true`). Never for the Gateway's own programmatic-send echoes (suppressed by the send-time own-send claim) or other chats. Branch on `msg.fromMe` if you must treat your own messages differently. |
 | `onPollVote(handler: (vote: PollVote) => void \| Promise<void>)` | Once per successfully decrypted vote, with the voter's canonical `Identity` and full current selection. A changed vote is the voter's new full selection; a withdrawal is `selectedOptions: []`. Correct in LID groups; no LID/PN double-identity. |
 
 ---

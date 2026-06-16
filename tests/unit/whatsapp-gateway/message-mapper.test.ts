@@ -106,6 +106,49 @@ describe('recovered (append) item eligibility & routing (US1, contract C1 G1/G4)
   });
 });
 
+describe('recovered (append) text-message eligibility & routing (US2, contract C1 G1/G2)', () => {
+  // A group message posted during an outage is re-delivered on reconnect as an `append` item.
+  // The pure dispatch decision admits an authorized one exactly as the live `notify` equivalent
+  // would be and — having no `pollUpdateMessage` — it routes to the onMessage text path
+  // (FR-001/FR-002, G1). An `append` item from an unauthorized chat is dropped at the
+  // authorization gate regardless of type (FR-005/SC-004, G2).
+
+  // The exact branch `handleMessagesUpsert` uses to send an item to the poll-vote path; false
+  // here means the item maps to onMessage.
+  const isPollVote = (msg: WAMessage): boolean => msg.message?.pollUpdateMessage != null;
+
+  it('a recovered authorized text item is dispatchable and maps to onMessage (G1)', () => {
+    const recovered = makeMessage({
+      remoteJid: '123456789@g.us',
+      participant: PN,
+      message: { conversation: 'sent while you were offline' },
+      messageTimestamp: 1_700_000_000,
+    });
+    // authorized chat + unclaimed (first sighting) ⇒ both gates pass.
+    expect(isDispatchable(true, () => true)).toBe(true);
+    // …it is NOT a poll vote, so it routes to the onMessage text path, not onPollVote.
+    expect(isPollVote(recovered)).toBe(false);
+    // …and it maps cleanly to the public IncomingMessage the consumer receives — recovered text
+    // is indistinguishable from a live message at the dispatch boundary.
+    const incoming = mapIncomingMessage(recovered, new IdentityResolver());
+    expect(incoming.text).toBe('sent while you were offline');
+    expect(incoming.groupId).toBe('123456789@g.us');
+    expect(incoming.sender.pn).toBe(PN);
+  });
+
+  it('a recovered item from an unauthorized chat is dropped before routing (G2)', () => {
+    // The authorization gate fails first and no claim is consumed, so a cross-chat catch-up item
+    // never reaches the routing branch — regardless of the upsert type (FR-005/SC-004).
+    let claimCalls = 0;
+    const claim = () => {
+      claimCalls += 1;
+      return true;
+    };
+    expect(isDispatchable(false, claim)).toBe(false);
+    expect(claimCalls).toBe(0);
+  });
+});
+
 describe('extractText (FR-014)', () => {
   it('reads a plain conversation message', () => {
     expect(extractText(makeMessage({ message: { conversation: 'hello there' } }))).toBe(
