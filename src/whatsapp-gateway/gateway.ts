@@ -480,6 +480,25 @@ export class WhatsAppGateway {
         continue;
       }
 
+      // At-most-once dispatch (FR-034). A single live message can be re-delivered (e.g. a
+      // decrypt-retry forcing session re-establishment); without this guard it would be
+      // dispatched twice — double poll, tripped `polls.game_id` UNIQUE. The canonical message
+      // identity is (remoteJid, id) — `id` alone is only unique within a chat — so we dedup on
+      // the same composite key the store uses everywhere else. Claiming here covers BOTH
+      // downstream paths (poll-vote and text). Unkeyed messages are extremely rare and can't be
+      // deduped, so they fall through and dispatch as before.
+      const id = msg.key?.id;
+      if (id) {
+        const messageKey = messageStoreKey(remoteJid, id);
+        if (!this.messageStore.claimOnce(messageKey)) {
+          this.config.logger.debug('WhatsAppGateway: dropping re-delivered live message', {
+            remoteJid,
+            id,
+          });
+          continue;
+        }
+      }
+
       // Route an authorized, live message. Poll votes decrypt → onPollVote (never onMessage
       // text dispatch, US3/FR-022); everything else maps → onMessage.
       if (msg.message?.pollUpdateMessage) {

@@ -27,7 +27,34 @@ export class MessageStore {
   // A Map preserves insertion order; we use that to track recency (oldest first).
   private readonly entries = new Map<string, WAMessage>();
 
+  // Generic "have I seen this key before" guard, kept separate from `entries`: `set` is
+  // called unconditionally for every upsert item (append/echo/other-chat included), so the
+  // content cache cannot answer "is this key new". This bounded, insertion-ordered set is
+  // the backing for `claimOnce`. The store does not know what callers use a claim for.
+  private readonly claimed = new Set<string>();
+
   constructor(private readonly maxSize: number = DEFAULT_MAX_SIZE) {}
+
+  /**
+   * Test-and-set a key: return `true` the first time it is claimed and `false` on every
+   * subsequent claim of the same key. A re-claim is a no-op. Bounded — past `maxSize` the
+   * oldest claim is evicted, so a very old key could claim fresh again; the window is far
+   * larger than any realistic re-delivery gap. The caller decides what a claim means.
+   */
+  claimOnce(key: string): boolean {
+    if (this.claimed.has(key)) {
+      return false;
+    }
+    this.claimed.add(key);
+    while (this.claimed.size > this.maxSize) {
+      const oldest = this.claimed.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.claimed.delete(oldest);
+    }
+    return true;
+  }
 
   /** Cache a message (sent or received). No-op if it lacks a usable key. */
   set(msg: WAMessage): void {

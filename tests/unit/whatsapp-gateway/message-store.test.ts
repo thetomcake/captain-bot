@@ -76,3 +76,35 @@ describe('MessageStore (research.md §2/§7)', () => {
     expect(store.getMessage(messageStoreKey(GROUP, 'A'))?.conversation).toBe('a');
   });
 });
+
+describe('MessageStore.claimOnce (test-and-set; backs at-most-once dispatch, FR-034)', () => {
+  it('returns true the first time a key is claimed', () => {
+    const store = new MessageStore();
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M1'))).toBe(true);
+  });
+
+  it('returns false on a second claim of the same key', () => {
+    const store = new MessageStore();
+    const key = messageStoreKey(GROUP, 'M1');
+    expect(store.claimOnce(key)).toBe(true);
+    expect(store.claimOnce(key)).toBe(false);
+  });
+
+  it('claims two distinct keys independently', () => {
+    const store = new MessageStore();
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M1'))).toBe(true);
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M2'))).toBe(true);
+  });
+
+  it('evicts the oldest claim past maxSize, making it re-claimable', () => {
+    const store = new MessageStore(2);
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M1'))).toBe(true);
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M2'))).toBe(true);
+    // Claiming a third distinct key evicts the oldest (M1); tracked set is now {M2, M3}.
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M3'))).toBe(true);
+    // M2 is still tracked (a re-claim is a no-op, no recency bump).
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M2'))).toBe(false);
+    // M1 was evicted, so it claims fresh as true again.
+    expect(store.claimOnce(messageStoreKey(GROUP, 'M1'))).toBe(true);
+  });
+});
