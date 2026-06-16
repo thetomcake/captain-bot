@@ -129,6 +129,48 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'stats': {
+      if (parsed.help) {
+        console.log('Usage: captain-stats stats [options]');
+        console.log('');
+        console.log('View stored statistics grouped by player (view-only)');
+        console.log('');
+        console.log('Options:');
+        console.log('  --game <id>        Show stats for a single game');
+        console.log('  --season <number>  Show stats for a whole season');
+        console.log('  --json             Output in JSON format');
+        console.log('  --config <path>    Config file path');
+        console.log('  --help             Show this help message');
+        process.exit(0);
+      }
+
+      const { statsCommand } = await import('./commands/stats.js');
+      await statsCommand({
+        game: parsed.game !== undefined ? parseInt(parsed.game) : undefined,
+        season: parsed.season !== undefined ? parseInt(parsed.season) : undefined,
+        json: parsed.json as boolean | undefined,
+      });
+      break;
+    }
+
+    case 'seasons': {
+      if (parsed.help) {
+        console.log('Usage: captain-stats seasons [options]');
+        console.log('');
+        console.log('List season history');
+        console.log('');
+        console.log('Options:');
+        console.log('  --json           Output in JSON format');
+        console.log('  --config <path>  Config file path');
+        console.log('  --help           Show this help message');
+        process.exit(0);
+      }
+
+      const { seasonsCommand } = await import('./commands/seasons.js');
+      await seasonsCommand({ json: parsed.json as boolean | undefined });
+      break;
+    }
+
     case 'poll': {
       if (parsed.help) {
         console.log('Usage: captain-stats poll [game-id] [options]');

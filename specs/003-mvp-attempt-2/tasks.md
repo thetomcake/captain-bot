@@ -154,14 +154,14 @@ description: "Task list for MAN v FAT Captain Stats Tool (MVP, Gateway-native)"
 
 ### Tests for User Story 4 (write first, verify failing) ⚠️
 
-- [ ] T036 [P] [US4] Write `tests/integration/stats/stats-command.test.ts`: `stats --game <id>` and `stats --season <n>` group by player (canonical identity) with goals/assists/weight/food; human + `--json` structural checks; works for a previous season (FR-023, view-only).
+- [X] T036 [P] [US4] Write `tests/integration/stats/stats-command.test.ts`: `stats --game <id>` and `stats --season <n>` group by player (canonical identity) with goals/assists/weight/food; human + `--json` structural checks; works for a previous season (FR-023, view-only). **Done:** seeds stats across two seasons (one past, one current); asserts human + `--json` player-grouped output for `--game` and `--season`, season totals aggregation, previous-season visibility (SC-007), empty→exit 1, and missing-selector→exit 2. Also added `tests/integration/cli/seasons-command.test.ts` (Constitution II test-first for the untested `seasons` command, T039): human list + `--json` (number/range/current flag).
 
 ### Implementation for User Story 4
 
-- [ ] T037 [P] [US4] Add read queries to `src/services/stat-service.ts` (stats by game, stats by season, grouped by canonical identity) and season listing support in `src/services/season-service.ts`.
-- [ ] T038 [US4] Implement `src/cli/commands/stats.ts` (NEW, view-only): `--game <id>`/`--season <n>`/`--json`, grouped output, exit `1` on empty (cli-commands.md).
-- [ ] T039 [P] [US4] Implement `src/cli/commands/seasons.ts` (NEW): list seasons (number, date range, current flag) with `--json` (FR-004).
-- [ ] T040 [US4] Route `stats` and `seasons` in `src/cli/index.ts`; make T036 pass.
+- [X] T037 [P] [US4] Add read queries to `src/services/stat-service.ts` (stats by game, stats by season, grouped by canonical identity) and season listing support in `src/services/season-service.ts`. **Done:** added `getStatsByGame`/`getStatsBySeason` returning enriched `PlayerStatLine[]` (joins `stat_records`→`games`→`whatsapp_users`, ordered by player then game date) via a shared `selectStatLines` projection; grouping/aggregation lives in the formatter. `SeasonService.getSeasons(teamId)` (ordered by season number desc) already supplies the season listing — no change needed.
+- [X] T038 [US4] Implement `src/cli/commands/stats.ts` (NEW, view-only): `--game <id>`/`--season <n>`/`--json`, grouped output, exit `1` on empty (cli-commands.md). **Done:** requires a selector (`--game` or `--season`, else exit 2), resolves a season by number for team 1, renders player-grouped human/`--json` output via `formatStatsTable`/`formatStatsJSON`; empty/not-found→exit 1, unexpected error→exit 3 (sibling-command convention).
+- [X] T039 [P] [US4] Implement `src/cli/commands/seasons.ts` (NEW): list seasons (number, date range, current flag) with `--json` (FR-004). **Done:** lists `SeasonService.getSeasons(1)` via `formatSeasonsTable`/`formatSeasonsJSON` (number, start/end range, current flag); empty→exit 1.
+- [X] T040 [US4] Route `stats` and `seasons` in `src/cli/index.ts`; make T036 pass. **Done:** added `stats` (`--game`/`--season`/`--json` + help) and `seasons` (`--json` + help) routes; full suite 214/214 green, < 10 s (SC-010).
 
 **Checkpoint**: US1–US4 work; historical stats are viewable across seasons.
 

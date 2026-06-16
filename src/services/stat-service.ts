@@ -10,9 +10,9 @@
  * (no captain-side correction, FR-024).
  */
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
-import type { Game, StatRecord } from '../types/entities.js';
+import type { Game, StatRecord, WeightDirection } from '../types/entities.js';
 import type { Identity, IncomingMessage } from '../whatsapp/gateway-port.js';
 import { extractStats, CONFIDENCE_THRESHOLD } from '../stats/stat-extractor.js';
 import { logger } from '../utils/logger.js';
@@ -20,6 +20,22 @@ import { logger } from '../utils/logger.js';
 /** Post-game window during which messages are interpreted as stat reports (FR-017). */
 export const STAT_WINDOW_DAYS = 3;
 const STAT_WINDOW_MS = STAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * One game's stat line for a single player, enriched with the player's canonical identity and the
+ * game it belongs to. The view layer (US4) groups these by player.
+ */
+export interface PlayerStatLine {
+  canonicalId: string;
+  displayName: string | null;
+  gameId: number;
+  opponent: string;
+  gameDate: Date;
+  goals: number;
+  assists: number;
+  weightDirection: WeightDirection | null;
+  foodTracking: boolean | null;
+}
 
 export class StatService {
   constructor(private readonly db: BetterSQLite3Database<typeof schema>) {}
@@ -48,6 +64,50 @@ export class StatService {
       confidence: extracted.confidence,
     });
     return row;
+  }
+
+  // ── Read queries (US4, view-only — FR-023) ───────────────────────────────
+
+  /**
+   * All stat lines for a single game, joined to the player's canonical identity. One row per
+   * player (the `unique(gameId, userId)` constraint guarantees no duplicates). Ordered by display
+   * name so the grouped view is stable.
+   */
+  async getStatsByGame(gameId: number): Promise<PlayerStatLine[]> {
+    return this.selectStatLines(eq(schema.games.id, gameId));
+  }
+
+  /**
+   * All stat lines for every game in a season, joined to the player's canonical identity. A player
+   * may appear once per game; the view layer aggregates per player. Ordered by player then game
+   * date so a player's games read chronologically.
+   */
+  async getStatsBySeason(seasonId: number): Promise<PlayerStatLine[]> {
+    return this.selectStatLines(eq(schema.games.seasonId, seasonId));
+  }
+
+  /** Shared join + projection for the two read queries above. */
+  private async selectStatLines(
+    where: ReturnType<typeof eq>
+  ): Promise<PlayerStatLine[]> {
+    const rows = await this.db
+      .select({
+        canonicalId: schema.whatsappUsers.canonicalId,
+        displayName: schema.whatsappUsers.displayName,
+        gameId: schema.games.id,
+        opponent: schema.games.opponent,
+        gameDate: schema.games.gameDate,
+        goals: schema.statRecords.goals,
+        assists: schema.statRecords.assists,
+        weightDirection: schema.statRecords.weightDirection,
+        foodTracking: schema.statRecords.foodTracking,
+      })
+      .from(schema.statRecords)
+      .innerJoin(schema.games, eq(schema.statRecords.gameId, schema.games.id))
+      .innerJoin(schema.whatsappUsers, eq(schema.statRecords.userId, schema.whatsappUsers.id))
+      .where(where)
+      .orderBy(asc(schema.whatsappUsers.displayName), asc(schema.games.gameDate));
+    return rows as PlayerStatLine[];
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────
