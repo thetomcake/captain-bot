@@ -35,4 +35,9 @@ export class CredentialsStore {
         set: { snapshot, updatedAt: now },
       });
   }
+
+  /** Discard the team's stored snapshot so the next `connect()` QR-pairs fresh (`connect --reset`). */
+  async clear(teamId: number): Promise<void> {
+    await this.db.delete(gatewayCredentials).where(eq(gatewayCredentials.teamId, teamId));
+  }
 }

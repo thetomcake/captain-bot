@@ -41,7 +41,6 @@
     "axios": "^1.17.0",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
-    "croner": "^10.0.1",
     "drizzle-orm": "^0.45.2",
     "minimist": "^1.2.8",
     "p-queue": "^9.3.0",

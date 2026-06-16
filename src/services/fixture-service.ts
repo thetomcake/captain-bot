@@ -47,10 +47,7 @@ export class FixtureService {
    * @param options - Fetch options
    * @returns Array of stored games
    */
-  async fetchFixtures(
-    teamId: number,
-    _options: { forceRefresh?: boolean} = {}
-  ): Promise<Game[]> {
+  async fetchFixtures(teamId: number, _options: { forceRefresh?: boolean } = {}): Promise<Game[]> {
     const team = await this.getTeam(teamId);
 
     // Get or create current season
@@ -70,7 +67,13 @@ export class FixtureService {
   private async persistScrapedFixtures(
     team: Team,
     season: Season,
-    scrapedFixtures: { date: string; time: string; opponent: string; venue: string; status: GameStatus }[]
+    scrapedFixtures: {
+      date: string;
+      time: string;
+      opponent: string;
+      venue: string;
+      status: GameStatus;
+    }[]
   ): Promise<Game[]> {
     // Convert scraped fixtures to games and store
     const games: Game[] = [];
@@ -94,10 +97,7 @@ export class FixtureService {
 
       if (existing) {
         // Update if changed
-        if (
-          existing.venue !== fixture.venue ||
-          existing.status !== fixture.status
-        ) {
+        if (existing.venue !== fixture.venue || existing.status !== fixture.status) {
           await this.db
             .update(schema.games)
             .set({
@@ -172,6 +172,13 @@ export class FixtureService {
     // Re-resolve the current season (the new one when a transition just happened).
     const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
     const games = await this.persistScrapedFixtures(team, season, scrapedFixtures);
+
+    logger.info('Fixtures checked', {
+      teamId,
+      scraped: scrapedFixtures.length,
+      persisted: games.length,
+      seasonTransition,
+    });
 
     return { games, seasonTransition, newSeasonNumber };
   }
@@ -288,7 +295,9 @@ export class FixtureService {
       const gameDate = this.parseGameDateTime(scraped.date, scraped.time);
 
       const existing = existingFixtures.find(
-        (f: Game) => f.opponent === scraped.opponent && Math.abs(f.gameDate.getTime() - gameDate.getTime()) < 86400000 * 7 // Within 7 days
+        (f: Game) =>
+          f.opponent === scraped.opponent &&
+          Math.abs(f.gameDate.getTime() - gameDate.getTime()) < 86400000 * 7 // Within 7 days
       );
 
       if (!existing) {
@@ -321,8 +330,8 @@ export class FixtureService {
     }
 
     // Detect removed fixtures (fixtures that no longer appear)
-    const scrapedOpponents = new Set(scrapedFixtures.map(f => f.opponent));
-    const upcomingFixtures = existingFixtures.filter(f => f.status === 'upcoming');
+    const scrapedOpponents = new Set(scrapedFixtures.map((f) => f.opponent));
+    const upcomingFixtures = existingFixtures.filter((f) => f.status === 'upcoming');
 
     for (const existing of upcomingFixtures) {
       if (!scrapedOpponents.has(existing.opponent)) {

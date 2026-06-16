@@ -66,9 +66,44 @@ typing the constitution asks for.
 **Suggested fix**: make the gateway optional/lazy for the preview path, or construct a no-op gateway
 for dry-run, so the type system reflects reality.
 
+## 5. Single-team assumption baked in across CLI + seam (medium — multi-team future)
+
+**Raised**: 2026-06-16 (review of the Phase 8 daemon rework).
+
+The MVP is a single-operator, single-team tool, so the daemon (and most of the codebase) assumes
+**exactly one team row** in the database. This is fine for the MVP but **will need changing** once
+the same database backs multiple teams — every "the team" lookup below would silently pick the wrong
+team (or an arbitrary one). Two distinct patterns, both needing a real team selector (CLI flag / env
+/ config) before multi-team:
+
+**A. "First team" via `limit(1)`** — implicitly assumes the only row is the right one:
+- `src/cli/commands/daemon.ts` — `db.select().from(teams).limit(1)` (the one flagged in review).
+- `src/cli/commands/connect.ts` — `--reset` clears the first team's credentials.
+- `src/whatsapp/gateway-factory.ts` — `createGateway` loads the **first** team's credential snapshot
+  and builds one Gateway. Multi-team means one Gateway/daemon **per team** (one WhatsApp account +
+  one authorized group each), so the factory and `daemon`/`connect` would need a team id.
+- `src/services/poll-service.ts` — `resolveNextFixture()` and `getLastPollPostedAt()` both
+  `limit(1)` on `teams`. The 5-minute `!postpoll` throttle (`teams.last_poll_posted_at`) is therefore
+  team-global-but-really-first-team; per-team it must key off the resolved team.
+- `src/cli/commands/init.ts` — `limit(1)` guards against re-init; multi-team init needs to allow
+  N teams (keyed by name/club URL).
+
+**B. Hardcoded `teamId = 1`** — the CLI view/sync commands assume the team's PK is literally `1`:
+- `src/cli/commands/fixtures.ts` (`const teamId = 1`)
+- `src/cli/commands/stats.ts` (`const teamId = 1`)
+- `src/cli/commands/seasons.ts` (`const teamId = 1`)
+- `src/cli/commands/sync.ts` (`options.teamId || 1` — already has a `--team-id` flag, defaults to 1).
+
+**Suggested fix (when multi-team lands)**: introduce a single team-resolution helper (e.g. a required
+`--team-id`/`--team-name` flag or `DEFAULT_TEAM_ID` env, resolved once at command entry) and thread the
+resolved id through services and the Gateway factory; build one Gateway/daemon per team. Replace every
+`limit(1)`-on-`teams` and `teamId = 1` above with that resolved id. The per-team credential snapshot
+and `last_poll_posted_at` columns already key on `teamId`, so the schema is multi-team-ready — only the
+**selection** logic is hardcoded.
+
 ---
 
-> Tree-level note (already tracked, not a new TODO): the project does not `tsc`-build because
-> `src/cli/commands/daemon.ts` still references the pre-rework `PollService` API
-> (`getNextGame`/`postPollForGame`) and deleted modules. This is resolved by **T035** (event-router)
-> and **T045** (daemon rework); see `tasks.md`.
+> Tree-level note (RESOLVED 2026-06-16): the project previously did not `tsc`-build because
+> `src/cli/commands/daemon.ts` referenced the pre-rework `PollService` API
+> (`getNextGame`/`postPollForGame`) and deleted modules. Fixed by **T035** (event-router) and
+> **T045** (daemon rework, Phase 8) — `npm run build` is now clean; see `tasks.md`.

@@ -71,24 +71,26 @@ const mockScraper = new MockFixtureScraper();
 
 ### WhatsApp Tests
 
-**Use**: Mock WhatsAppClient interface (service boundary)
+**Use**: The `FakeGateway` (`tests/helpers/fake-gateway.ts`), which implements the MVP's own
+`IWhatsAppGateway` port (`src/whatsapp/gateway-port.ts`) — the single seam over the in-repo
+WhatsApp Gateway library. The MVP never imports Baileys (SC-011, guarded by
+`tests/integration/whatsapp/no-baileys-import.test.ts`); all WhatsApp behaviour flows through the
+port, so the fake is a drop-in for the real `WhatsAppGateway`.
 
 ```typescript
-interface IWhatsAppClient {
-  connect(): Promise<void>;
-  sendMessage(to: string, message: string): Promise<void>;
-}
+import { FakeGateway } from '#tests/helpers/fake-gateway.js';
 
-class MockWhatsAppClient implements IWhatsAppClient {
-  async connect() { /* test behavior */ }
-  async sendMessage() { /* test behavior */ }
-}
+const gateway = new FakeGateway();
+gateway.simulateMessage({ text: '!postpoll', sender: gateway.identities.alice });
+gateway.simulatePollVote({ pollId, voter: gateway.identities.alice, selectedOptions: [0] });
+// Assert against gateway.sentPolls / gateway.sentMessages / gateway.deletedMessages.
 ```
 
 **Why**:
-- Can't run real WhatsApp in CI
-- Baileys SDK is external integration
-- Service interface is under our control
+- Can't run real WhatsApp in CI; the Gateway library owns the Baileys integration.
+- `IWhatsAppGateway` is the MVP's own service boundary — mock there, never Baileys internals.
+- Interactive pairing/live votes are validated via the Gateway's manual `bin/` entry points +
+  `quickstart.md`, not the automated suite.
 
 ### Parser Tests
 
