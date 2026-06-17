@@ -98,9 +98,12 @@ specs/005-manvfat-auth-scraper/
 ```
 src/
 ├── scraping/
-│   ├── fixture-scraper.ts        # MODIFIED: DefaultFixtureScraper gains team auth context +
+│   ├── fixture-scraper.ts        # MODIFIED: DefaultFixtureScraper now REQUIRES a ManvfatSession
+│   │                             #           (always-authenticated; no unauthenticated path) +
 │   │                             #           at-most-once re-login; NEW isAuthenticated(). Parser UNCHANGED.
-│   └── manvfat-session.ts        # NEW: login POST, tough-cookie jar, encrypt/persist to team row
+│   ├── manvfat-session.ts        # NEW: login POST, tough-cookie jar, encrypt/persist to team row
+│   └── request-queue.ts          # NEW: shared per-host rate limiter (p-queue moved out of
+│                                  #      fixture-scraper); login POST + page GET both enqueue per-request
 ├── database/
 │   └── schema.ts                 # MODIFIED: teams += manvfat_username/password/cookie columns
 ├── services/

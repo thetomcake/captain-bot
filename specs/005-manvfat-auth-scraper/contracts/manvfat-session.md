@@ -38,7 +38,11 @@ export interface IManvfatSession {
      Set-Cookie, then `persistCookie(team.id, encryptSecret(jar.serializeSync()))`.
    - On `200` (login form re-rendered) or missing `wordpress_logged_in_*` → throw `AuthError`.
 3. **`cookieHeader(url)`** = `jar.getCookieStringSync(url)`.
-4. **Secrecy**: `pwd`, decrypted password, `cookieHeader`, `Set-Cookie`, the jar blob, and the
+4. **Rate limiting**: the default `login()` HTTP call routes its POST through the shared per-host
+   limiter (`src/scraping/request-queue.ts`, `enqueueRequest`) — the same queue the page GET uses —
+   so logins are throttled by design, not incidentally by their call-site (research.md "Politeness").
+   The injected test seam bypasses it (no network).
+5. **Secrecy**: `pwd`, decrypted password, `cookieHeader`, `Set-Cookie`, the jar blob, and the
    encryption key are never passed to the logger.
 
 ## Test contract (Vitest)

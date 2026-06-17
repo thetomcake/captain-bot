@@ -1,7 +1,8 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import PQueue from 'p-queue';
 import { withRetry } from '../utils/retry.js';
+import { enqueueRequest } from './request-queue.js';
+import type { IManvfatSession } from './manvfat-session.js';
 
 export interface Fixture {
   date: string; // ISO format YYYY-MM-DD
@@ -38,8 +39,18 @@ export function extractDate(weekText: string, year?: number): string {
 
   // Month name to number mapping
   const months: Record<string, number> = {
-    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
-    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11
+    january: 0,
+    february: 1,
+    march: 2,
+    april: 3,
+    may: 4,
+    june: 5,
+    july: 6,
+    august: 7,
+    september: 8,
+    october: 9,
+    november: 10,
+    december: 11,
   };
 
   const month = months[monthName.toLowerCase()];
@@ -191,36 +202,34 @@ export function scrapeFixtures(html: string): Fixture[] {
 async function fetchWithRetry(
   url: string,
   maxRetries = 3,
-  baseDelay = 1000
+  baseDelay = 1000,
+  cookieHeader?: string
 ): Promise<string> {
   return withRetry(
     async () => {
-      const response = await axios.get<string>(url, {
-        headers: {
+      // Each actual HTTP request — including every retry attempt — passes through the shared
+      // per-host rate limiter (feature 005), so politeness is enforced at the request boundary
+      // regardless of caller.
+      return enqueueRequest(async () => {
+        const headers: Record<string, string> = {
           'User-Agent': 'Mozilla/5.0 (compatible; CaptainStats/1.0)',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        timeout: 10000,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        };
+        // Attach the authenticated session cookie when one is supplied (feature 005). The
+        // header value is never logged (FR-007).
+        if (cookieHeader) {
+          headers['Cookie'] = cookieHeader;
+        }
+        const response = await axios.get<string>(url, {
+          headers,
+          timeout: 10000,
+        });
+        return response.data;
       });
-      return response.data;
     },
     { maxRetries, baseDelay }
   );
 }
-
-/**
- * Global request queue with rate limiting for respectful scraping
- *
- * Uses p-queue to prevent concurrent requests from bypassing rate limits.
- * - intervalCap: 5 requests
- * - interval: 60000ms (1 minute)
- * - carryoverConcurrencyCount: ensures strict rate limiting across intervals
- */
-const requestQueue = new PQueue({
-  intervalCap: 5,
-  interval: 60000,
-  carryoverConcurrencyCount: true,
-});
 
 /**
  * Scraper interface for dependency injection (test mocking)
@@ -231,36 +240,32 @@ export interface IFixtureScraper {
 }
 
 /**
- * Default scraper implementation using real HTTP calls
+ * Default scraper implementation using real HTTP calls.
+ *
+ * Always authenticated (feature 005): the MAN v FAT fixtures page is gated behind a WordPress
+ * login, so a session is **required**. `fetchHtml` logs in if no stored cookie exists, then
+ * attaches the session's cookie header to the GET. The login POST and the page GET are each
+ * rate-limited individually via the shared queue (`request-queue.ts`).
+ *
+ * Tests never construct this directly — they inject a mock at the `IFixtureScraper` boundary
+ * (`MockFixtureScraper` etc.), so the auth path stays below the boundary (FR-008).
  */
 export class DefaultFixtureScraper implements IFixtureScraper {
+  constructor(private readonly session: IManvfatSession) {}
+
   async fetchHtml(url: string): Promise<string> {
-    return await requestQueue.add(() => fetchWithRetry(url, 3, 1000));
+    // No stored cookie → log in first so the very first fetch carries the session. (Reactive
+    // re-login on an *expired* cookie is added in US2's recovery loop — feature 005 T017.)
+    if (!this.session.hasCookie(url)) {
+      await this.session.login();
+    }
+
+    // The GET is rate-limited at the request boundary inside fetchWithRetry; login() rate-limits
+    // its own POST. Both are sequential leaf requests — never nested in one queue token.
+    return fetchWithRetry(url, 3, 1000, this.session.cookieHeader(url));
   }
 
   parseFixtures(html: string): Fixture[] {
     return scrapeFixtures(html);
   }
-}
-
-/**
- * Fetch and scrape fixtures from a club URL
- * @param url - Club page URL (e.g., https://manvfatfootball.com/club/watford/)
- * @param options - Fetch options
- * @returns Array of scraped fixtures
- */
-export async function fetchFixtures(
-  url: string,
-  options: { skipRateLimit?: boolean } = {}
-): Promise<Fixture[]> {
-  let html: string;
-
-  // Apply rate limiting unless explicitly skipped (for tests)
-  if (options.skipRateLimit) {
-    html = await fetchWithRetry(url, 3, 1000);
-  } else {
-    html = await requestQueue.add(() => fetchWithRetry(url, 3, 1000));
-  }
-
-  return scrapeFixtures(html);
 }

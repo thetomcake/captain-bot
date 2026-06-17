@@ -64,14 +64,21 @@ Single project: `src/`, `tests/` at repo root.
 
 ### Tests for User Story 1 ⚠️ (pure logic only — write first, ensure they FAIL)
 
-- [ ] T009 [P] [US1] Unit test `crypto.ts` in `tests/unit/utils/crypto.test.ts`: `encryptSecret`→`decryptSecret` round-trips arbitrary strings; ciphertext differs from plaintext and across calls (random IV); a missing/wrong-length key → `ConfigError`; a tampered ciphertext → throws (GCM auth-tag).
-- [ ] T010 [P] [US1] Unit test `Set-Cookie` → jar parsing + persist round-trip in `tests/unit/scrapers/manvfat-session.test.ts`: feeding a captured 302 `Set-Cookie` populates the jar with `wordpress_logged_in_*`; serialize+`encryptSecret` then `decryptSecret`+deserialize yields the same `getCookieStringSync`; a 200/loginform response (no cookie) → `AuthError`; constructing a session from a team row with absent `manvfatUsername`/`manvfatPassword` → `ConfigError` (FR-009 scrape-time missing-credentials clause).
+- [X] T009 [P] [US1] Unit test `crypto.ts` in `tests/unit/utils/crypto.test.ts`: `encryptSecret`→`decryptSecret` round-trips arbitrary strings; ciphertext differs from plaintext and across calls (random IV); a missing/wrong-length key → `ConfigError`; a tampered ciphertext → throws (GCM auth-tag).
+- [X] T010 [P] [US1] Unit test `Set-Cookie` → jar parsing + persist round-trip in `tests/unit/scrapers/manvfat-session.test.ts`: feeding a captured 302 `Set-Cookie` populates the jar with `wordpress_logged_in_*`; serialize+`encryptSecret` then `decryptSecret`+deserialize yields the same `getCookieStringSync`; a 200/loginform response (no cookie) → `AuthError`; constructing a session from a team row with absent `manvfatUsername`/`manvfatPassword` → `ConfigError` (FR-009 scrape-time missing-credentials clause).
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Create `src/scraping/manvfat-session.ts` implementing `IManvfatSession` (contracts/manvfat-session.md): construct from team row (if `manvfatUsername`/`manvfatPassword` are absent on the team row, throw `ConfigError` with an actionable message mapped to the existing config-error exit code — the scrape-time missing-credentials clause of FR-009 — before any login attempt; otherwise decrypt password + cookie blob via `crypto.ts`, build `CookieJar`); `login()` (form POST to `/dash/?wpe-login=true`, no-follow-redirect, `wordpress_test_cookie` header, feed `Set-Cookie` into jar, `persistCookie` the encrypted serialized jar, throw `AuthError` on non-302/missing cookie); `cookieHeader(url)`; `hasCookie(url)`. HTTP call is an injectable seam. Never log secrets.
-- [ ] T012 [US1] In `src/scraping/fixture-scraper.ts`, give `DefaultFixtureScraper` a constructor taking a `ManvfatSession`; `fetchHtml` logs in if no cookie, then GETs with `Cookie: session.cookieHeader(url)` via the existing `requestQueue`/`withRetry`. Parser path unchanged.
-- [ ] T013 [US1] In `src/services/fixture-service.ts`, build a **team-scoped** `DefaultFixtureScraper` per operation (using the fetched team's creds + a `persistCookie` callback that writes `teams.manvfat_cookie`); keep using an injected scraper as-is when provided (tests). Touches `fetchFixtures`/`syncFixtures`/`detectFixtureChanges`.
+- [X] T010a [US1] Create `src/scraping/request-queue.ts`: a **shared per-host rate limiter** (the
+  existing `p-queue`, moved out of `fixture-scraper.ts`) exporting `enqueueRequest(fn)`. Politeness
+  is a property of the target host, not the calling module, so **both** the login POST (T011) and
+  the page GET (T012) enqueue through it at the **individual-HTTP-request boundary** — each request
+  = one token, so the 5-req/min cap is enforced for real (a login-then-fetch is two requests = two
+  tokens). MUST wrap only leaf HTTP calls — never a composite operation, and never enqueue a task
+  that awaits another enqueued task (would starve under the concurrency cap). Precedes T011/T012.
+- [X] T011 [US1] Create `src/scraping/manvfat-session.ts` implementing `IManvfatSession` (contracts/manvfat-session.md): construct from team row (if `manvfatUsername`/`manvfatPassword` are absent on the team row, throw `ConfigError` with an actionable message mapped to the existing config-error exit code — the scrape-time missing-credentials clause of FR-009 — before any login attempt; otherwise decrypt password + cookie blob via `crypto.ts`, build `CookieJar`); `login()` (form POST to `/dash/?wpe-login=true`, no-follow-redirect, `wordpress_test_cookie` header, feed `Set-Cookie` into jar, `persistCookie` the encrypted serialized jar, throw `AuthError` on non-302/missing cookie); `cookieHeader(url)`; `hasCookie(url)`. The login HTTP call is an injectable seam AND its default impl routes the POST through `enqueueRequest` (T010a). Never log secrets.
+- [X] T012 [US1] In `src/scraping/fixture-scraper.ts`, give `DefaultFixtureScraper` a constructor taking a **required** `ManvfatSession` (the fixtures page is always gated — there is no unauthenticated path; tests inject at the `IFixtureScraper` boundary, never construct this directly). `fetchHtml` logs in if no cookie, then GETs with `Cookie: session.cookieHeader(url)` via `withRetry`, with the GET enqueued through `enqueueRequest` (T010a) at the request boundary — NOT a composite queue wrapper around the whole login-then-fetch. Parser path unchanged. Also remove the now-dead standalone `fetchFixtures(url, {skipRateLimit})` module function (no callers; `FixtureService.fetchFixtures` is the only consumer) so the relocated queue has a single owner.
+- [X] T013 [US1] In `src/services/fixture-service.ts`, build a **team-scoped** `DefaultFixtureScraper` per operation (using the fetched team's creds + a `persistCookie` callback that writes `teams.manvfat_cookie`); keep using an injected scraper as-is when provided (tests). Touches `fetchFixtures`/`syncFixtures`/`detectFixtureChanges`.
 
 **Checkpoint**: First scrape logs in + persists encrypted cookie; subsequent scrapes reuse it. MVP works.
 
@@ -92,6 +99,7 @@ Single project: `src/`, `tests/` at repo root.
 
 - [ ] T016 [P] [US2] Add exported pure helper `isAuthenticated(html: string): boolean` to `src/scraping/fixture-scraper.ts` using cheerio `$('body').hasClass('logged-in')` (research.md Finding 5) — independent of fixture presence.
 - [ ] T017 [US2] Extend `DefaultFixtureScraper.fetchHtml` (from T012) with the recovery loop: fetch → if `!isAuthenticated`, `session.login()` once (persists jar) → re-fetch → if still `!isAuthenticated`, throw `AuthError`. Enforce at-most-once (FR-004); an authenticated response is returned as-is even with zero fixtures (FR-005a). Expose the fetch/login seams T015 injects.
+- [ ] T017a [US2] **Resolve the `hasCookie` gate now that the recovery loop is the real authentication check.** Once T017 lands, the response-driven `isAuthenticated` check (Finding 5) handles "no cookie" and "expired cookie" identically, so the pre-fetch `hasCookie`/login is no longer a *correctness* mechanism — only an optimization saving one wasted GET on first login / ~fortnightly expiry, and its name dangerously implies "session is valid" when it only means "a cookie string exists" (which Finding 5 says is NOT auth state). Pick **one** and apply it: (a) **drop `hasCookie` entirely** — `fetchHtml` always fetch-then-recover (simpler; preferred unless the wasted first GET matters); or (b) **keep it but rename/redocument** it as an explicit optimization (e.g. `// optimization only — authentication is determined by isAuthenticated, never by cookie presence`), updating `IManvfatSession`, the contract, and the T010 test accordingly. Whichever is chosen, the misleading "presence == authenticated" implication must be gone.
 
 **Checkpoint**: Expired cookies self-heal; bad creds fail loudly. US1 + US2 both work.
 
@@ -126,15 +134,15 @@ Single project: `src/`, `tests/` at repo root.
 
 - **Setup (Phase 1)**: no dependencies. T003 gates T014.
 - **Foundational (Phase 2)**: depends on Setup — BLOCKS all stories. T004 → T005; T006/T007 [P]; T008 after T007.
-- **US1 (Phase 3)**: depends on Foundational (needs schema, crypto, key). Delivers session module + cookie-on-fetch + persistence.
-- **US2 (Phase 4)**: depends on **US1** (extends `manvfat-session.ts` + `fetchHtml` from T011/T012) — same files, not parallel with US1.
+- **US1 (Phase 3)**: depends on Foundational (needs schema, crypto, key). Delivers the shared rate limiter + session module + cookie-on-fetch + persistence.
+- **US2 (Phase 4)**: depends on **US1** (extends `manvfat-session.ts` + `fetchHtml` from T011/T012) — same files, not parallel with US1. T017a (resolve `hasCookie`) comes after T017, once the recovery loop is the authority.
 - **US3 (Phase 5)**: T018 depends on crypto (T007) + schema (T004); T019 audits US1/US2 code.
 - **Polish (Phase 6)**: after desired stories. T020 (live) needs US1+US2+US3.
 
 ### Within Each User Story
 
 - Pure-logic tests (T009–T010, T014–T015) written and FAILING before their implementation.
-- Session module (T011) before scraper wiring (T012) before service wiring (T013) before recovery loop (T017).
+- Shared rate limiter (T010a) before session (T011) before scraper wiring (T012) before service wiring (T013) before recovery loop (T017) before the `hasCookie` resolution (T017a).
 
 ### Parallel Opportunities
 

@@ -18,11 +18,18 @@ the existing selectors (research.md Finding 4).
 
 ## Wiring — team auth context (below the boundary)
 
-`DefaultFixtureScraper` gains a constructor accepting a `ManvfatSession` (or its deps). Because
-`fetchHtml(url)` carries no team, **`FixtureService` builds a team-scoped `DefaultFixtureScraper`
-per operation** (it already calls `getTeam(teamId)` first, and the team row now carries
-credentials + cookie + provides the `persistCookie` callback). When a scraper is **injected**
-(tests), `FixtureService` uses it as-is and none of the auth path runs.
+`DefaultFixtureScraper` gains a constructor accepting a **required** `ManvfatSession`. The fixtures
+page is always gated behind the WordPress login, so there is **no unauthenticated path** on this
+class (an unauthenticated GET just returns the broken empty page — the bug this feature fixes).
+Because `fetchHtml(url)` carries no team, **`FixtureService` builds a team-scoped
+`DefaultFixtureScraper` per operation** (it already calls `getTeam(teamId)` first, and the team row
+now carries credentials + cookie + provides the `persistCookie` callback). When a scraper is
+**injected** (tests), `FixtureService` uses it as-is and none of the auth path runs — tests mock at
+the `IFixtureScraper` boundary and never construct `DefaultFixtureScraper` directly.
+
+Rate limiting lives in a shared per-host limiter (`src/scraping/request-queue.ts`): the page GET
+and the login POST each enqueue as one request, so the 5-req/min cap holds across the whole feature
+(see research.md "Politeness / safety").
 
 ## DefaultFixtureScraper.fetchHtml — NEW auth behaviour
 

@@ -140,7 +140,16 @@ encrypted; `manvfat_username` is plaintext (not secret).
 
 ## Decision: Politeness / safety
 
-- Reuse the existing `p-queue` rate limiter and `withRetry`; login is infrequent (≈fortnightly).
+- **Shared per-host rate limiter, enforced at the request boundary.** The existing `p-queue` is
+  extracted into `src/scraping/request-queue.ts` (`enqueueRequest`) and **both** the login POST
+  (`manvfat-session.ts`) and the page GET (`fixture-scraper.ts`) enqueue through it at the
+  *individual HTTP-request* level. Rationale: politeness is a property of the target host, not the
+  calling module — wrapping a *composite* "login-then-fetch" in one token (or leaving the login
+  POST on a separate unthrottled path) lets a single operation fire 2–3 requests under one slot, so
+  the 5-req/min cap would not actually hold. One token per request makes the cap real. (Care: never
+  enqueue a task that awaits another enqueued task — it would starve under the concurrency cap; only
+  leaf HTTP calls are wrapped.) Login is infrequent (≈fortnightly), so it rarely competes for slots.
+- Reuse the existing `withRetry`; each retry attempt is itself an enqueued request.
 - Never log `pwd`, the `Cookie`/`Set-Cookie` headers, the jar blob, or the encryption key.
 - `rememberme=forever` maximises session life and minimises login frequency. The operator
   explicitly authorised use of their account for their own club's data.

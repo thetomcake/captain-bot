@@ -4,6 +4,8 @@ import * as schema from '../database/schema.js';
 import { Game, GameStatus, Season } from '../types/entities.js';
 import { SeasonService } from './season-service.js';
 import { IFixtureScraper, DefaultFixtureScraper } from '../scraping/fixture-scraper.js';
+import { ManvfatSession } from '../scraping/manvfat-session.js';
+import { getCredentialKey } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
 type Team = typeof schema.teams.$inferSelect;
@@ -31,14 +33,48 @@ export interface SyncResult {
 }
 
 export class FixtureService {
-  private scraper: IFixtureScraper;
+  /**
+   * An explicitly injected scraper (tests use the service-boundary mocks). When present it is
+   * used verbatim and none of the MAN v FAT auth path runs. When absent, each operation builds
+   * a team-scoped {@link DefaultFixtureScraper} carrying that team's credentials + cookie
+   * (feature 005).
+   */
+  private injectedScraper?: IFixtureScraper;
 
   constructor(
     private db: BetterSQLite3Database<typeof schema>,
     private seasonService: SeasonService,
     scraper?: IFixtureScraper
   ) {
-    this.scraper = scraper || new DefaultFixtureScraper();
+    this.injectedScraper = scraper;
+  }
+
+  /**
+   * Resolve the scraper for an operation. With an injected scraper (tests) it is returned
+   * as-is. Otherwise a team-scoped {@link DefaultFixtureScraper} is built: it wraps a
+   * {@link ManvfatSession} seeded from the team's stored credentials + cookie, with a
+   * `persistCookie` callback that writes the refreshed encrypted jar back to
+   * `teams.manvfat_cookie` (FR-003). Constructing the session throws `ConfigError` when the
+   * team has no credentials, or when `MANVFAT_CREDENTIAL_KEY` is missing/invalid (FR-009).
+   */
+  private getScraper(team: Team): IFixtureScraper {
+    if (this.injectedScraper) {
+      return this.injectedScraper;
+    }
+
+    const key = getCredentialKey();
+    const session = new ManvfatSession({
+      team,
+      key,
+      persistCookie: async (teamId, encryptedJarBlob) => {
+        await this.db
+          .update(schema.teams)
+          .set({ manvfatCookie: encryptedJarBlob, updatedAt: new Date() })
+          .where(eq(schema.teams.id, teamId));
+      },
+    });
+
+    return new DefaultFixtureScraper(session);
   }
 
   /**
@@ -53,9 +89,10 @@ export class FixtureService {
     // Get or create current season
     const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
 
-    // Scrape fixtures from club URL using injectable scraper
-    const html = await this.scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = this.scraper.parseFixtures(html);
+    // Scrape fixtures from club URL using the team-scoped (or injected) scraper
+    const scraper = this.getScraper(team);
+    const html = await scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = scraper.parseFixtures(html);
 
     return this.persistScrapedFixtures(team, season, scrapedFixtures);
   }
@@ -151,8 +188,9 @@ export class FixtureService {
   async syncFixtures(teamId: number): Promise<SyncResult> {
     const team = await this.getTeam(teamId);
 
-    const html = await this.scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = this.scraper.parseFixtures(html);
+    const scraper = this.getScraper(team);
+    const html = await scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = scraper.parseFixtures(html);
 
     const seasonTransition = await this.seasonService.shouldCreateNewSeason(
       teamId,
@@ -279,9 +317,10 @@ export class FixtureService {
       throw new Error(`Team not found: ${teamId}`);
     }
 
-    // Scrape current fixtures using injectable scraper
-    const html = await this.scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = this.scraper.parseFixtures(html);
+    // Scrape current fixtures using the team-scoped (or injected) scraper
+    const scraper = this.getScraper(team);
+    const html = await scraper.fetchHtml(team.clubUrl);
+    const scrapedFixtures = scraper.parseFixtures(html);
 
     const changes: FixtureChanges = {
       added: [],
