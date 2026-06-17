@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/005-manvfat-auth-scraper/plan.md
+at specs/006-next-fixture-selection/plan.md
 <!-- SPECKIT END -->
 
 ## Project Governance
