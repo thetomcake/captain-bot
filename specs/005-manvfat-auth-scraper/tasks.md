@@ -36,9 +36,9 @@ Single project: `src/`, `tests/` at repo root.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 [P] Add `tough-cookie` (+ `@types/tough-cookie`) to `package.json` dependencies; `npm install`.
-- [ ] T002 [P] Add `MANVFAT_USERNAME`, `MANVFAT_PASSWORD`, and `MANVFAT_CREDENTIAL_KEY` (with a note on generating a 32-byte base64 key, e.g. `openssl rand -base64 32`) to `.env.example` under a new "MAN v FAT Credentials" section.
-- [ ] T003 [P] Anonymous (logged-out) Watford club-page HTML fixture — **already captured** at `tests/fixtures/html/manvfat-fixtures-unauthenticated.html` (its `<body>` class has NO `logged-in` token; counterpart to the existing authed `tests/fixtures/html/manvfat-fixtures.html`, whose body class DOES). Verify it backs the auth-state detection test (T014); no re-capture needed unless the file is missing.
+- [X] T001 [P] Add `tough-cookie` (+ `@types/tough-cookie`) to `package.json` dependencies; `npm install`.
+- [X] T002 [P] Add `MANVFAT_USERNAME`, `MANVFAT_PASSWORD`, and `MANVFAT_CREDENTIAL_KEY` (with a note on generating a 32-byte base64 key, e.g. `openssl rand -base64 32`) to `.env.example` under a new "MAN v FAT Credentials" section.
+- [X] T003 [P] Anonymous (logged-out) Watford club-page HTML fixture — **already captured** at `tests/fixtures/html/manvfat-fixtures-unauthenticated.html` (its `<body>` class has NO `logged-in` token; counterpart to the existing authed `tests/fixtures/html/manvfat-fixtures.html`, whose body class DOES). Verify it backs the auth-state detection test (T014); no re-capture needed unless the file is missing.
 
 ---
 
@@ -46,11 +46,11 @@ Single project: `src/`, `tests/` at repo root.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Add `manvfat_username`, `manvfat_password`, `manvfat_cookie` (all `text`, nullable) to the `teams` table in `src/database/schema.ts`; update the `Team`/`NewTeam` inferred types' consumers and `src/types/entities.ts` as needed.
-- [ ] T005 Generate + apply the Drizzle migration for the three new columns (`npm run db:generate` then `db:migrate`); commit the generated SQL under `drizzle/`.
-- [ ] T006 [P] Add `AuthError` to `src/utils/errors.ts` (extends `AppError`, code `AUTH_ERROR`, exit code `5` — the next free value; existing codes are 1=NotFound, 2=ConfigError, 3=DatabaseError, 4=ScrapingError/WhatsAppError, so 4 is already shared and not a free choice). Actionable message. FR-009's scrape-time missing-credentials case maps to `ConfigError` (exit 2), not `AuthError`.
-- [ ] T007 [P] Create `src/utils/crypto.ts`: `encryptSecret`/`decryptSecret` (AES-256-GCM, 12-byte random IV, format `base64(iv).base64(tag).base64(ct)`), key read from `MANVFAT_CREDENTIAL_KEY` (base64 → 32 bytes). Throw `ConfigError` on missing/!32-byte key (FR-009).
-- [ ] T008 Load + validate `MANVFAT_CREDENTIAL_KEY` in `src/config/env.ts` (and surface `manvfatUsername`/`manvfatPassword` for `init` seeding); add to `EnvironmentConfig` in `src/types/config.ts`.
+- [X] T004 Add `manvfat_username`, `manvfat_password`, `manvfat_cookie` (all `text`, nullable) to the `teams` table in `src/database/schema.ts`; update the `Team`/`NewTeam` inferred types' consumers and `src/types/entities.ts` as needed.
+- [X] T005 Generate + apply the Drizzle migration for the three new columns (`npm run db:generate` then `db:migrate`); commit the generated SQL under `drizzle/`.
+- [X] T006 [P] Add `AuthError` to `src/utils/errors.ts` (extends `AppError`, code `AUTH_ERROR`, exit code `5` — the next free value; existing codes are 1=NotFound, 2=ConfigError, 3=DatabaseError, 4=ScrapingError/WhatsAppError, so 4 is already shared and not a free choice). Actionable message. FR-009's scrape-time missing-credentials case maps to `ConfigError` (exit 2), not `AuthError`.
+- [X] T007 [P] Create `src/utils/crypto.ts`: `encryptSecret`/`decryptSecret` (AES-256-GCM, 12-byte random IV, format `base64(iv).base64(tag).base64(ct)`), key read from `MANVFAT_CREDENTIAL_KEY` (base64 → 32 bytes). Throw `ConfigError` on missing/!32-byte key (FR-009).
+- [X] T008 Load + validate `MANVFAT_CREDENTIAL_KEY` in `src/config/env.ts` (and surface `manvfatUsername`/`manvfatPassword` for `init` seeding); add to `EnvironmentConfig` in `src/types/config.ts`.
 
 **Checkpoint**: schema migrated; `AuthError` + crypto + key config ready. Stories can begin.
 

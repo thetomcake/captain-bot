@@ -13,6 +13,13 @@ export interface EnvironmentConfig {
   // WhatsApp
   authorizedGroupId?: string;
 
+  // MAN v FAT player-portal credentials (feature 005). Username/password seed the team
+  // at `init` (FR-010); the credential key (base64 32-byte AES key) encrypts the password
+  // and session cookie at rest. All optional at load — required only when scraping/seeding.
+  manvfatUsername?: string;
+  manvfatPassword?: string;
+  manvfatCredentialKey?: string;
+
   // Database
   databasePath: string;
 

@@ -14,6 +14,11 @@ export const teams = sqliteTable('teams', {
   name: text('name').notNull(),
   clubUrl: text('club_url').notNull(),
   whatsappGroupId: text('whatsapp_group_id'),
+  // MAN v FAT player-portal credentials + session, per team (feature 005). The fixtures page
+  // is gated behind a WordPress login; auth lives below the IFixtureScraper boundary.
+  manvfatUsername: text('manvfat_username'), // login email, not secret
+  manvfatPassword: text('manvfat_password'), // AES-256-GCM encrypted (base64(iv).base64(tag).base64(ct))
+  manvfatCookie: text('manvfat_cookie'), // encrypted serialized tough-cookie jar; null until first login
   // Last time an availability poll was posted/replaced for this team (any path). Backs the
   // `!postpoll` 5-minute throttle (T051): chat triggers arriving inside the window are ignored
   // so a member cannot spam-replace the poll. Null until the first poll is posted.

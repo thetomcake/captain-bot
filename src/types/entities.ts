@@ -16,6 +16,9 @@ export interface Team {
   clubUrl: string;
   whatsappGroupId: string | null;
   lastPollPostedAt: Date | null; // last poll post/replace time; backs the !postpoll throttle (T051)
+  manvfatUsername: string | null; // MAN v FAT portal login email (not secret)
+  manvfatPassword: string | null; // encrypted (AES-256-GCM) portal password
+  manvfatCookie: string | null; // encrypted serialized tough-cookie jar; null until first login
   createdAt: Date;
   updatedAt: Date;
 }

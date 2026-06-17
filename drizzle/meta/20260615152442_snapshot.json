@@ -603,6 +603,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "manvfat_username": {
+          "name": "manvfat_username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "manvfat_password": {
+          "name": "manvfat_password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "manvfat_cookie": {
+          "name": "manvfat_cookie",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "last_poll_posted_at": {
           "name": "last_poll_posted_at",
           "type": "integer",

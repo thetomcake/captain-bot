@@ -114,6 +114,12 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
   const authorizedGroupId = process.env.AUTHORIZED_GROUP_ID;
   validateGroupId(authorizedGroupId);
 
+  // MAN v FAT portal credentials (feature 005) — surfaced for `init` seeding and the
+  // scrape-time crypto. Optional at load; required only when scraping/seeding.
+  const manvfatUsername = process.env.MANVFAT_USERNAME;
+  const manvfatPassword = process.env.MANVFAT_PASSWORD;
+  const manvfatCredentialKey = process.env.MANVFAT_CREDENTIAL_KEY;
+
   const databasePath = optional('DATABASE_PATH', path.join(process.cwd(), 'captain-stats.db'));
 
   // Stat capture window (FR-019). Scheduling knobs (POLL_POST_HOUR / FIXTURE_SYNC_INTERVAL) are
@@ -130,6 +136,9 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
     teamName,
     clubUrl,
     authorizedGroupId,
+    manvfatUsername,
+    manvfatPassword,
+    manvfatCredentialKey,
     databasePath,
     statCaptureDays,
     timezone,
@@ -152,6 +161,34 @@ export function requireAuthorizedGroupId(config: EnvironmentConfig = getEnv()): 
     );
   }
   return config.authorizedGroupId;
+}
+
+/**
+ * Resolve and validate the MAN v FAT credential key for crypto operations (FR-009).
+ *
+ * Like {@link requireAuthorizedGroupId}, the key is optional in the loaded config (most
+ * commands never encrypt anything) but required by any path that reads or writes the
+ * encrypted password/cookie. This is the single place the key is sourced, decoded, and
+ * length-checked; `src/utils/crypto.ts` is a pure primitive that just receives the
+ * returned 32-byte buffer. Callers map the thrown {@link ConfigError} to exit code 2.
+ */
+export function getCredentialKey(config: EnvironmentConfig = getEnv()): Buffer {
+  if (!config.manvfatCredentialKey) {
+    throw new ConfigError(
+      'MANVFAT_CREDENTIAL_KEY is required to encrypt/decrypt MAN v FAT credentials. ' +
+        'Generate a 32-byte base64 key with: openssl rand -base64 32, then set it in .env.'
+    );
+  }
+
+  const key = Buffer.from(config.manvfatCredentialKey, 'base64');
+  if (key.length !== 32) {
+    throw new ConfigError(
+      'Invalid MANVFAT_CREDENTIAL_KEY: must decode to exactly 32 bytes. ' +
+        'Generate a valid key with: openssl rand -base64 32'
+    );
+  }
+
+  return key;
 }
 
 /**

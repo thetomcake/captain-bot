@@ -65,6 +65,21 @@ export class ScrapingError extends AppError {
 }
 
 /**
+ * Authentication error (MAN v FAT login failed or session still not authenticated
+ * after a re-login). Distinct from ScrapingError so callers can tell a genuine auth
+ * failure (bad credentials / unrecoverable session) from a transport/parse problem.
+ *
+ * Exit code 5 — the next free value (1=NotFound, 2=ConfigError, 3=DatabaseError,
+ * 4=ScrapingError/WhatsAppError/RateLimit). Note: a scrape attempted with no stored
+ * credentials is a ConfigError (exit 2), not an AuthError.
+ */
+export class AuthError extends AppError {
+  constructor(message: string) {
+    super(message, 'AUTH_ERROR', 5);
+  }
+}
+
+/**
  * Not found error
  */
 export class NotFoundError extends AppError {
