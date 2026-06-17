@@ -57,7 +57,9 @@ function validateClubUrl(url: string): void {
  */
 function validateGroupId(jid: string | undefined): void {
   if (jid && !jid.endsWith('@g.us')) {
-    throw new ConfigError(`Invalid AUTHORIZED_GROUP_ID: must be a WhatsApp group JID (*@g.us), got: ${jid}`);
+    throw new ConfigError(
+      `Invalid AUTHORIZED_GROUP_ID: must be a WhatsApp group JID (*@g.us), got: ${jid}`
+    );
   }
 }
 
@@ -76,7 +78,7 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
     if (!fs.existsSync(envPath)) {
       throw new ConfigError(
         `Config file not found: ${envPath}\n` +
-        `Specified via --config flag. Check the path and try again.`
+          `Specified via --config flag. Check the path and try again.`
       );
     }
 
@@ -86,7 +88,7 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
     } catch (error) {
       throw new ConfigError(
         `Config file exists but is not readable: ${envPath}\n` +
-        `Check file permissions (should be readable by current user).`
+          `Check file permissions (should be readable by current user).`
       );
     }
   }
@@ -98,8 +100,7 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
   // But if user specified --config and it failed, throw error
   if (result.error && configPath) {
     throw new ConfigError(
-      `Failed to load config file: ${envPath}\n` +
-      `Error: ${result.error.message}`
+      `Failed to load config file: ${envPath}\n` + `Error: ${result.error.message}`
     );
   }
 
@@ -130,7 +131,7 @@ export function loadEnvironmentConfig(configPath?: string): EnvironmentConfig {
   const timezone = optional('TIMEZONE', 'Europe/London');
 
   // Node environment
-  const nodeEnv = (optional('NODE_ENV', 'development') as EnvironmentConfig['nodeEnv']);
+  const nodeEnv = optional('NODE_ENV', 'development') as EnvironmentConfig['nodeEnv'];
 
   return {
     teamName,
@@ -161,6 +162,28 @@ export function requireAuthorizedGroupId(config: EnvironmentConfig = getEnv()): 
     );
   }
   return config.authorizedGroupId;
+}
+
+/**
+ * Resolve the MAN v FAT portal credentials for paths that need to log in (currently `init`
+ * seeding — FR-010).
+ *
+ * Like {@link requireAuthorizedGroupId}, the username/password are optional in the loaded config
+ * (group-free, scrape-free commands never need them) but required on demand. This is the single
+ * place that requirement is enforced, keeping the config boundary — not `process.env` — the source
+ * of truth. Callers map the thrown {@link ConfigError} to exit code 2.
+ */
+export function requireManvfatCredentials(config: EnvironmentConfig = getEnv()): {
+  username: string;
+  password: string;
+} {
+  if (!config.manvfatUsername || !config.manvfatPassword) {
+    throw new ConfigError(
+      'MANVFAT_USERNAME / MANVFAT_PASSWORD are required to seed MAN v FAT credentials. ' +
+        'The fixtures page is gated behind a WordPress login — set both in .env before running init.'
+    );
+  }
+  return { username: config.manvfatUsername, password: config.manvfatPassword };
 }
 
 /**

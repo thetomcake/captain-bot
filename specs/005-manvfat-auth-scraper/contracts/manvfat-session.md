@@ -21,10 +21,14 @@ export interface IManvfatSession {
   cookieHeader(url: string): string;
   /** Perform the WordPress form-POST login, populate the jar, and persist it. */
   login(): Promise<void>;
-  /** Whether a usable cookie currently exists in the jar (cheap gate before fetching). */
-  hasCookie(url: string): boolean;
 }
 ```
+
+> **Note (T017a):** an earlier `hasCookie(url)` gate was dropped. Once the recovery loop landed,
+> response-driven `isAuthenticated` became the single authority for "is this session valid", so a
+> cookie-presence check was at best an optimization and at worst misleading (a cookie string
+> existing is NOT proof of an authenticated session — research.md Finding 5). `fetchHtml` now
+> always fetches and lets the response decide.
 
 ## Behavioural contract
 

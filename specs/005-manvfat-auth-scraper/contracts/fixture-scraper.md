@@ -35,8 +35,9 @@ and the login POST each enqueue as one request, so the 5-req/min cap holds acros
 
 ```
 fetchHtml(url):
-  if not session.hasCookie(url): session.login()       # no stored cookie → log in first
   html = GET url with Cookie: session.cookieHeader(url)  # via existing withRetry + p-queue
+                                                         # (empty cookie on a fresh session → just
+                                                         #  comes back unauthenticated below)
   if not isAuthenticated(html):                        # Finding 5: no `logged-in` body class
       session.login()                                  # at-most-once re-login (FR-004); persists jar
       html = GET url with Cookie: session.cookieHeader(url)
@@ -44,6 +45,11 @@ fetchHtml(url):
           throw AuthError(...)                         # FR-005 — cannot authenticate
   return html                                          # may be authenticated-but-empty (off-season) — VALID (FR-005a)
 ```
+
+> **`hasCookie` gate dropped (T017a):** the pre-fetch cookie-presence check was removed. The
+> response-driven `isAuthenticated` check handles "no cookie" and "expired cookie" identically, so
+> the gate was only an optimization (saving one wasted GET on the first-ever login) and its name
+> misleadingly implied "session is valid". `fetchHtml` always fetches and lets the response decide.
 
 - The re-login trigger is **authentication state** (`logged-in` body class), NOT fixture
   presence. An authenticated page with zero fixtures returns normally and `parseFixtures` yields

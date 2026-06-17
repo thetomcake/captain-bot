@@ -3,6 +3,9 @@ import { SeasonService } from '../../services/season-service.js';
 import { FixtureService } from '../../services/fixture-service.js';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from '../../database/schema.js';
+import { getCredentialKey, requireManvfatCredentials } from '../../config/env.js';
+import { encryptSecret } from '../../utils/crypto.js';
+import { AppError } from '../../utils/errors.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -44,9 +47,20 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
     const clubUrl = options.clubUrl || process.env.CLUB_URL;
 
     if (!clubUrl) {
-      console.error('Error: CLUB_URL not set. Please set CLUB_URL in .env file or pass --club-url flag');
+      console.error(
+        'Error: CLUB_URL not set. Please set CLUB_URL in .env file or pass --club-url flag'
+      );
       process.exit(2);
     }
+
+    // MAN v FAT portal credentials (feature 005, FR-010): the fixtures page is gated behind a
+    // WordPress login, so credentials are seeded onto the team at init, mirroring CLUB_URL. Both
+    // the credentials and the encryption key are sourced from the validated config layer (env.ts) —
+    // not process.env directly. The username is stored in plaintext; the password is encrypted at
+    // rest. Each helper throws ConfigError (→ exit 2 via the catch below) when its input is missing.
+    const { username: manvfatUsername, password: manvfatPassword } = requireManvfatCredentials();
+    const credentialKey = getCredentialKey();
+    const encryptedPassword = encryptSecret(manvfatPassword, credentialKey);
 
     // Create team
     console.log(`Creating team: ${teamName}`);
@@ -56,6 +70,8 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
         name: teamName,
         clubUrl,
         whatsappGroupId: null,
+        manvfatUsername,
+        manvfatPassword: encryptedPassword,
       })
       .returning();
 
@@ -84,6 +100,8 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
     process.exit(0);
   } catch (error) {
     console.error('Error:', error instanceof Error ? error.message : String(error));
-    process.exit(3);
+    // Use the error's declared exit code when it is a known AppError (e.g. a missing/invalid
+    // MANVFAT_CREDENTIAL_KEY raises ConfigError → exit 2); fall back to 3 otherwise.
+    process.exit(error instanceof AppError ? error.statusCode : 3);
   }
 }

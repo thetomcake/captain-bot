@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { withRetry } from '../utils/retry.js';
+import { AuthError } from '../utils/errors.js';
 import { enqueueRequest } from './request-queue.js';
 import type { IManvfatSession } from './manvfat-session.js';
 
@@ -197,6 +198,19 @@ export function scrapeFixtures(html: string): Fixture[] {
 }
 
 /**
+ * Whether a fetched club page is from an authenticated session (feature 005, FR-005a).
+ *
+ * The signal is the WordPress `logged-in` class on `<body>` (research.md Finding 5) — NOT
+ * the presence of fixtures. A logged-out page and an off-season authenticated page both render
+ * empty fixture tables, so fixture count cannot discriminate them; the body class can. An
+ * authenticated-but-empty page therefore returns `true` here and is treated as a valid empty
+ * result by the recovery loop (no re-login, no error).
+ */
+export function isAuthenticated(html: string): boolean {
+  return cheerio.load(html)('body').hasClass('logged-in');
+}
+
+/**
  * Fetch URL using shared retry utility
  */
 async function fetchWithRetry(
@@ -240,29 +254,58 @@ export interface IFixtureScraper {
 }
 
 /**
+ * Injectable page-fetch seam: GET `url` with the given cookie header, returning the HTML body.
+ * The default issues the real rate-limited+retried axios GET; the recovery-loop unit tests
+ * substitute a fake so the control flow can be exercised without a network call (feature 005 T015).
+ */
+export type FetchPageFn = (url: string, cookieHeader: string) => Promise<string>;
+
+/**
  * Default scraper implementation using real HTTP calls.
  *
  * Always authenticated (feature 005): the MAN v FAT fixtures page is gated behind a WordPress
- * login, so a session is **required**. `fetchHtml` logs in if no stored cookie exists, then
- * attaches the session's cookie header to the GET. The login POST and the page GET are each
- * rate-limited individually via the shared queue (`request-queue.ts`).
+ * login, so a session is **required**. `fetchHtml` fetches the page, and if the response is not
+ * authenticated (`isAuthenticated` false — no `logged-in` body class), re-logs in **at most once**
+ * and retries; persistent failure raises `AuthError`. Authentication state, not fixture presence,
+ * is the trigger — an authenticated-but-empty (off-season) page is returned as a valid result
+ * (FR-005a). The login POST and each page GET are rate-limited individually via the shared queue.
  *
  * Tests never construct this directly — they inject a mock at the `IFixtureScraper` boundary
  * (`MockFixtureScraper` etc.), so the auth path stays below the boundary (FR-008).
  */
 export class DefaultFixtureScraper implements IFixtureScraper {
-  constructor(private readonly session: IManvfatSession) {}
+  private readonly fetchPage: FetchPageFn;
+
+  constructor(
+    private readonly session: IManvfatSession,
+    fetchPage?: FetchPageFn
+  ) {
+    this.fetchPage =
+      fetchPage ?? ((url, cookieHeader) => fetchWithRetry(url, 3, 1000, cookieHeader));
+  }
 
   async fetchHtml(url: string): Promise<string> {
-    // No stored cookie → log in first so the very first fetch carries the session. (Reactive
-    // re-login on an *expired* cookie is added in US2's recovery loop — feature 005 T017.)
-    if (!this.session.hasCookie(url)) {
+    // Fetch with whatever cookie the jar currently holds (empty string on a brand-new session —
+    // that fetch simply comes back unauthenticated and the recovery branch logs in). Cookie
+    // *presence* is deliberately NOT used as the auth gate: `isAuthenticated` on the response is
+    // the single source of truth, so "no cookie" and "expired cookie" are handled identically.
+    let html = await this.fetchPage(url, this.session.cookieHeader(url));
+
+    if (!isAuthenticated(html)) {
+      // At-most-once re-login (FR-004): login() persists the refreshed encrypted jar.
       await this.session.login();
+      html = await this.fetchPage(url, this.session.cookieHeader(url));
+
+      if (!isAuthenticated(html)) {
+        throw new AuthError(
+          'MAN v FAT returned an unauthenticated page after re-login. The stored ' +
+            'credentials may be invalid — check MANVFAT_USERNAME / MANVFAT_PASSWORD for this team.'
+        );
+      }
     }
 
-    // The GET is rate-limited at the request boundary inside fetchWithRetry; login() rate-limits
-    // its own POST. Both are sequential leaf requests — never nested in one queue token.
-    return fetchWithRetry(url, 3, 1000, this.session.cookieHeader(url));
+    // May be authenticated-but-empty (off-season) — that is a valid empty result (FR-005a).
+    return html;
   }
 
   parseFixtures(html: string): Fixture[] {

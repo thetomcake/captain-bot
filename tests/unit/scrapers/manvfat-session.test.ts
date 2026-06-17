@@ -82,7 +82,7 @@ describe('ManvfatSession (T010 — pure logic, injected login seam)', () => {
       });
 
       expect(reconstructed.cookieHeader(CLUB_URL)).toBe(first.cookieHeader(CLUB_URL));
-      expect(reconstructed.hasCookie(CLUB_URL)).toBe(true);
+      expect(reconstructed.cookieHeader(CLUB_URL)).toContain('wordpress_logged_in');
     });
 
     it('throws AuthError when the login form is re-rendered (200, no logged-in cookie)', async () => {
@@ -132,15 +132,16 @@ describe('ManvfatSession (T010 — pure logic, injected login seam)', () => {
     });
   });
 
-  describe('hasCookie — cheap gate before fetching', () => {
-    it('is false for a fresh session with no stored cookie', () => {
+  describe('cookieHeader — empty jar', () => {
+    it('is the empty string for a fresh session with no stored cookie', () => {
+      // A fresh session carries no cookie; fetchHtml fetches anyway and the response-driven
+      // isAuthenticated check (not cookie presence) drives the login (feature 005 T017a).
       const session = new ManvfatSession({
         team: teamWith(),
         key,
         persistCookie: async () => {},
       });
 
-      expect(session.hasCookie(CLUB_URL)).toBe(false);
       expect(session.cookieHeader(CLUB_URL)).toBe('');
     });
   });

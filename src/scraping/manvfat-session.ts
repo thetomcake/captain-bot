@@ -79,8 +79,6 @@ export interface IManvfatSession {
   cookieHeader(url: string): string;
   /** Perform the WordPress form-POST login, populate the jar, and persist it. */
   login(): Promise<void>;
-  /** Whether a usable cookie currently exists in the jar (cheap gate before fetching). */
-  hasCookie(url: string): boolean;
 }
 
 /**
@@ -147,10 +145,6 @@ export class ManvfatSession implements IManvfatSession {
 
   cookieHeader(url: string): string {
     return this.jar.getCookieStringSync(url);
-  }
-
-  hasCookie(url: string): boolean {
-    return this.jar.getCookieStringSync(url).length > 0;
   }
 
   async login(): Promise<void> {
