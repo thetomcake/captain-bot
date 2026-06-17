@@ -123,8 +123,8 @@ Single project: `src/`, `tests/` at repo root.
 ## Phase 6: Polish & Live Validation
 
 - [ ] T020 [US1+US2+US3] Run `quickstart.md` Scenarios 1–6 against the **live** site (operator-authorised) — authoritative validation of the login wire format, persistence, recovery, and encryption-at-rest (SC-001…SC-006).
-- [ ] T021 [P] Verify existing scraper/fixture tests still pass unchanged (`MockFixtureScraper`, `StubScraper`, `tests/integration/fixtures/*`, `tests/integration/seasons/*`) — confirms `IFixtureScraper` boundary preservation (FR-008).
-- [ ] T022 [P] `npm run build` + `npm run format` clean; no `any` introduced (constitution III).
+- [X] T021 [P] Verify existing scraper/fixture tests still pass unchanged (`MockFixtureScraper`, `StubScraper`, `tests/integration/fixtures/*`, `tests/integration/seasons/*`) — confirms `IFixtureScraper` boundary preservation (FR-008).
+- [X] T022 [P] `npm run build` + `npm run format` clean; no `any` introduced (constitution III).
 
 ---
 

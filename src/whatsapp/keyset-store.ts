@@ -54,12 +54,7 @@ export class KeysetStore {
     const [poll] = await this.db
       .select()
       .from(schema.polls)
-      .where(
-        and(
-          eq(schema.polls.pollMessageId, ref.pollId),
-          eq(schema.polls.groupId, ref.groupId)
-        )
-      )
+      .where(and(eq(schema.polls.pollMessageId, ref.pollId), eq(schema.polls.groupId, ref.groupId)))
       .limit(1);
     if (!poll) return null;
     return {

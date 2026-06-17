@@ -12,7 +12,7 @@ export interface RetryOptions {
 const DEFAULT_RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface AxiosLike {
@@ -41,10 +41,7 @@ function isRetryableError(error: unknown, retryableStatusCodes: number[]): boole
 /**
  * Execute a function with exponential backoff retry logic
  */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: RetryOptions = {}
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const maxRetries = options.maxRetries ?? 3;
   const baseDelay = options.baseDelay ?? 1000;
   const retryableStatusCodes = options.retryableStatusCodes ?? DEFAULT_RETRYABLE_STATUS_CODES;

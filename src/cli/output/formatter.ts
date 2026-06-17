@@ -69,9 +69,7 @@ export function formatTable(
   });
 
   // Format header row
-  const headerRow = headers
-    .map((header, i) => header.padEnd(columnWidths[i] || 0))
-    .join('  ');
+  const headerRow = headers.map((header, i) => header.padEnd(columnWidths[i] || 0)).join('  ');
 
   const separator = columnWidths.map((width) => '─'.repeat(width)).join('──');
 

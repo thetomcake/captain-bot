@@ -110,8 +110,9 @@ current session's deltas, but never as the source of truth.)
 - **`seasons`** — `seasonNumber`, `startDate`, `endDate`, `isCurrent`, `unique(teamId, seasonNumber)`.
   Season transition flips `isCurrent` and inserts the next number (FR-005).
 - **`games`** — `gameDate`, `opponent`, `venue`, `status` (`upcoming|completed|cancelled`),
-  `scrapedUrl`. On-demand re-fetches update date/time/venue in place; reschedules are handled
-  manually by re-sending `!postpoll` (no automatic reschedule detection — FR-026).
+  `scrapedUrl`, plus `homeTeam`/`awayTeam` (see amendment below). On-demand re-fetches update
+  date/time/venue in place; reschedules are handled manually by re-sending `!postpoll` (no
+  automatic reschedule detection — FR-026).
 - **`stat_records`** — `goals`, `assists`, `weightDirection` (`up|down|same|unknown`),
   `foodTracking` (bool), `confidenceScore` (0–100), `sourceMessage`, `capturedAt`, `editedAt`,
   `unique(gameId, userId)`. Already shaped for US3 capture/merge and US4 view — reused as-is.
@@ -119,6 +120,25 @@ current session's deltas, but never as the source of truth.)
   stored stats change only via a later player-message field-level override, FR-019/FR-024.)
 
 ---
+
+## Amendment: home/away on `games` (FR-002a — next-fixture selection fix)
+
+The club page lists the **whole league**, so a stored game must record both sides to (a) identify
+which games are *ours* and (b) label the opponent correctly whether we are home or away. `games`
+gains:
+
+| column | type | notes |
+|---|---|---|
+| `homeTeam` | `text NOT NULL` | as printed on the club page |
+| `awayTeam` | `text NOT NULL` | as printed on the club page |
+
+`opponent` is retained, now defined as *the opponent from our team's perspective*: for a game our
+team (`teams.name` / `TEAM_NAME`) plays, the side that is not us; for a league-only game it defaults
+to `awayTeam` and is never consumed. The poll's "next fixture" is the next upcoming `games` row
+where `homeTeam` or `awayTeam` matches our team (case-insensitive, trimmed); all league rows are
+retained for future use. New Drizzle migration adds the columns; existing current-season rows are
+backfilled or cleared-and-re-synced (see `plan-next-fixture-selection.md` → Migration). Persistence
+and season-transition identity switch to the stable key `(seasonId, gameDate, homeTeam, awayTeam)`.
 
 ## Cascade & integrity rules
 

@@ -38,7 +38,9 @@ export async function seasonsCommand(options: SeasonsOptions = {}): Promise<void
     process.exit(0);
   } catch (error) {
     if (options.json) {
-      console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      console.log(
+        JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+      );
     } else {
       console.error('Error:', error instanceof Error ? error.message : String(error));
     }

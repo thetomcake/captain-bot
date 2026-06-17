@@ -30,19 +30,25 @@ describe('Fixture Service Integration Tests', () => {
     migrate(db, { migrationsFolder: resolve(__dirname, '../../../drizzle') });
 
     // Create test team
-    const [team] = await db.insert(schema.teams).values({
-      name: 'Test Team',
-      clubUrl: 'https://manvfatfootball.com/club/watford/',
-      whatsappGroupId: null,
-    }).returning();
+    const [team] = await db
+      .insert(schema.teams)
+      .values({
+        name: 'Test Team',
+        clubUrl: 'https://manvfatfootball.com/club/watford/',
+        whatsappGroupId: null,
+      })
+      .returning();
     teamId = team.id;
 
     // Create test season
-    const [season] = await db.insert(schema.seasons).values({
-      teamId,
-      seasonNumber: 1,
-      isCurrent: true,
-    }).returning();
+    const [season] = await db
+      .insert(schema.seasons)
+      .values({
+        teamId,
+        seasonNumber: 1,
+        isCurrent: true,
+      })
+      .returning();
     seasonId = season.id;
 
     // Initialize services with mock scraper (no real HTTP calls)
@@ -76,7 +82,7 @@ describe('Fixture Service Integration Tests', () => {
         where: (games, { eq }) => eq(games.seasonId, seasonId),
       });
 
-      games.forEach(game => {
+      games.forEach((game) => {
         expect(game.seasonId).toBe(seasonId);
       });
     });
@@ -85,10 +91,8 @@ describe('Fixture Service Integration Tests', () => {
       await fixtureService.fetchFixtures(teamId);
 
       const upcomingGames = await db.query.games.findMany({
-        where: (games, { and, eq }) => and(
-          eq(games.seasonId, seasonId),
-          eq(games.status, 'upcoming')
-        ),
+        where: (games, { and, eq }) =>
+          and(eq(games.seasonId, seasonId), eq(games.status, 'upcoming')),
       });
 
       expect(upcomingGames.length).toBeGreaterThan(0);
@@ -148,10 +152,11 @@ describe('Fixture Service Integration Tests', () => {
       const newDate = new Date(gameToUpdate.gameDate);
       newDate.setDate(newDate.getDate() + 7); // Move 1 week forward
 
-      await db.update(schema.games)
+      await db
+        .update(schema.games)
         .set({
           gameDate: newDate,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(schema.games.id, gameToUpdate.id));
 
@@ -199,10 +204,7 @@ describe('Fixture Service Integration Tests', () => {
       // Re-check against the (unchanged) club website
       await fixtureService.syncFixtures(teamId);
 
-      const [refreshed] = await db
-        .select()
-        .from(schema.games)
-        .where(eq(schema.games.id, game!.id));
+      const [refreshed] = await db.select().from(schema.games).where(eq(schema.games.id, game!.id));
 
       // The re-scrape reflects the website's value, overwriting the drift
       expect(refreshed!.venue).toBe(game!.venue);
@@ -230,7 +232,7 @@ describe('Fixture Service Integration Tests', () => {
         where: (games, { eq }) => eq(games.seasonId, seasonId),
       });
 
-      games.forEach(game => {
+      games.forEach((game) => {
         // Venue should be set (either from HTML or default)
         expect(game.venue.length).toBeGreaterThan(0);
       });

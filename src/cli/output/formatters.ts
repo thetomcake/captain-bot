@@ -40,7 +40,7 @@ export function formatFixturesJSON(season: Season, fixtures: Game[]): string {
   const output = {
     season: season.seasonNumber,
     is_current: season.isCurrent,
-    fixtures: fixtures.map(f => ({
+    fixtures: fixtures.map((f) => ({
       id: f.id,
       date: formatDate(f.gameDate),
       time: formatTime(f.gameDate),
@@ -72,7 +72,9 @@ export function formatFixturesWithResponsesTable(
   for (const fixture of fixtures) {
     const date = formatDate(fixture.gameDate);
     const time = formatTime(fixture.gameDate);
-    out.push(`${date} ${time}  vs ${fixture.opponent}  (${fixture.venue})  ${capitalizeFirst(fixture.status)}`);
+    out.push(
+      `${date} ${time}  vs ${fixture.opponent}  (${fixture.venue})  ${capitalizeFirst(fixture.status)}`
+    );
 
     const poll = responsesByGame.get(fixture.id);
     if (!poll) {

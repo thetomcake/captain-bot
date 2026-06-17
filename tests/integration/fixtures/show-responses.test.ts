@@ -53,9 +53,30 @@ describe('fixtures --show-responses (US6)', () => {
     const [g1, g2, g3] = await db
       .insert(schema.games)
       .values([
-        { seasonId: season.id, gameDate: new Date(Date.now() + 7 * day), opponent: 'Red Devils', venue: 'Victoria Park', status: 'upcoming', scrapedUrl: null },
-        { seasonId: season.id, gameDate: new Date(Date.now() + 14 * day), opponent: 'Blue Warriors', venue: 'Central Stadium', status: 'upcoming', scrapedUrl: null },
-        { seasonId: season.id, gameDate: new Date(Date.now() + 21 * day), opponent: 'Green Giants', venue: 'East Field', status: 'upcoming', scrapedUrl: null },
+        {
+          seasonId: season.id,
+          gameDate: new Date(Date.now() + 7 * day),
+          opponent: 'Red Devils',
+          venue: 'Victoria Park',
+          status: 'upcoming',
+          scrapedUrl: null,
+        },
+        {
+          seasonId: season.id,
+          gameDate: new Date(Date.now() + 14 * day),
+          opponent: 'Blue Warriors',
+          venue: 'Central Stadium',
+          status: 'upcoming',
+          scrapedUrl: null,
+        },
+        {
+          seasonId: season.id,
+          gameDate: new Date(Date.now() + 21 * day),
+          opponent: 'Green Giants',
+          venue: 'East Field',
+          status: 'upcoming',
+          scrapedUrl: null,
+        },
       ])
       .returning();
     gameWithVotes = g1.id;
@@ -66,8 +87,18 @@ describe('fixtures --show-responses (US6)', () => {
     const [alice, anon] = await db
       .insert(schema.whatsappUsers)
       .values([
-        { canonicalId: 'alice@s.whatsapp.net', displayName: 'Alice', firstSeenAt: new Date(), lastSeenAt: new Date() },
-        { canonicalId: 'bob@s.whatsapp.net', displayName: null, firstSeenAt: new Date(), lastSeenAt: new Date() },
+        {
+          canonicalId: 'alice@s.whatsapp.net',
+          displayName: 'Alice',
+          firstSeenAt: new Date(),
+          lastSeenAt: new Date(),
+        },
+        {
+          canonicalId: 'bob@s.whatsapp.net',
+          displayName: null,
+          firstSeenAt: new Date(),
+          lastSeenAt: new Date(),
+        },
       ])
       .returning();
 
@@ -143,7 +174,10 @@ describe('fixtures --show-responses (US6)', () => {
       const withVotes = byGame.get(gameWithVotes);
       expect(withVotes).toBeDefined();
       expect(withVotes!.responses.map((r) => r.selectedOption)).toEqual(['Yes', 'No']);
-      expect(withVotes!.responses[0]).toMatchObject({ displayName: 'Alice', selectedOption: 'Yes' });
+      expect(withVotes!.responses[0]).toMatchObject({
+        displayName: 'Alice',
+        selectedOption: 'Yes',
+      });
       const fallback = withVotes!.responses[1];
       expect(fallback.displayName).toBeNull();
       expect(fallback.canonicalId).toBe('bob@s.whatsapp.net');
@@ -184,7 +218,10 @@ describe('fixtures --show-responses (US6)', () => {
       const byId = new Map<number, any>(json.fixtures.map((f: any) => [f.id, f]));
 
       expect(byId.get(gameNoPoll).poll).toBeNull();
-      expect(byId.get(gameNoVotes).poll).toMatchObject({ question: 'Available vs Blue Warriors?', responses: [] });
+      expect(byId.get(gameNoVotes).poll).toMatchObject({
+        question: 'Available vs Blue Warriors?',
+        responses: [],
+      });
 
       const withVotes = byId.get(gameWithVotes).poll;
       expect(withVotes.question).toBe('Available vs Red Devils?');

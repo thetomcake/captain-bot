@@ -54,21 +54,40 @@ const ASSIST_PATTERNS: Pattern<number>[] = [
 ];
 
 const WEIGHT_PATTERNS: Pattern<WeightDirection>[] = [
-  { regex: /\bweight\s+(up|down|same)\b/i, confidence: 90, value: (m) => m[1]!.toLowerCase() as WeightDirection },
+  {
+    regex: /\bweight\s+(up|down|same)\b/i,
+    confidence: 90,
+    value: (m) => m[1]!.toLowerCase() as WeightDirection,
+  },
   { regex: /\b(?:lost|dropped)\s+weight\b/i, confidence: 85, value: () => 'down' },
   { regex: /\b(?:gained|put\s+on)\s+weight\b/i, confidence: 85, value: () => 'up' },
   { regex: /\bweight\s+(?:stayed\s+)?(?:the\s+)?same\b/i, confidence: 85, value: () => 'same' },
 ];
 
 const FOOD_PATTERNS: Pattern<boolean>[] = [
-  { regex: /\b(?:didn'?t|did\s+not|not|no)\b[^.!?]*\btrack(?:ed|ing)?\b/i, confidence: 85, value: () => false },
+  {
+    regex: /\b(?:didn'?t|did\s+not|not|no)\b[^.!?]*\btrack(?:ed|ing)?\b/i,
+    confidence: 85,
+    value: () => false,
+  },
   { regex: /\bno\s+(?:food\s+)?track(?:ing)?\b/i, confidence: 85, value: () => false },
-  { regex: /\btrack(?:ed|ing)?\b[^.!?]*\b(?:food|meals?|eating|macros)\b/i, confidence: 85, value: () => true },
-  { regex: /\b(?:logged|tracked)\s+(?:my\s+)?(?:food|meals?|eating|macros)\b/i, confidence: 85, value: () => true },
+  {
+    regex: /\btrack(?:ed|ing)?\b[^.!?]*\b(?:food|meals?|eating|macros)\b/i,
+    confidence: 85,
+    value: () => true,
+  },
+  {
+    regex: /\b(?:logged|tracked)\s+(?:my\s+)?(?:food|meals?|eating|macros)\b/i,
+    confidence: 85,
+    value: () => true,
+  },
 ];
 
 /** First matching pattern for a field, or `undefined` if none match. */
-function firstMatch<T>(text: string, patterns: Pattern<T>[]): { value: T; confidence: number } | undefined {
+function firstMatch<T>(
+  text: string,
+  patterns: Pattern<T>[]
+): { value: T; confidence: number } | undefined {
   for (const p of patterns) {
     const m = text.match(p.regex);
     if (m) return { value: p.value(m), confidence: p.confidence };

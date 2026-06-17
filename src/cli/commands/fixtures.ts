@@ -33,7 +33,7 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
     let season;
     if (options.season) {
       const seasons = await seasonService.getSeasons(teamId);
-      season = seasons.find(s => s.seasonNumber === options.season);
+      season = seasons.find((s) => s.seasonNumber === options.season);
 
       if (!season) {
         if (options.json) {
@@ -48,7 +48,9 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
 
       if (!season) {
         if (options.json) {
-          console.log(JSON.stringify({ error: 'No current season found. Run "captain-stats init" first.' }));
+          console.log(
+            JSON.stringify({ error: 'No current season found. Run "captain-stats init" first.' })
+          );
         } else {
           console.error('Error: No current season found. Run "captain-stats init" first.');
         }
@@ -91,7 +93,9 @@ export async function fixturesCommand(options: FixturesOptions = {}): Promise<vo
   } catch (error) {
     // Database and other errors exit with code 3
     if (options.json) {
-      console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      console.log(
+        JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+      );
     } else {
       console.error('Error:', error instanceof Error ? error.message : String(error));
     }

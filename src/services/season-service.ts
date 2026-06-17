@@ -16,12 +16,7 @@ export class SeasonService {
     const [season] = await this.db
       .select()
       .from(schema.seasons)
-      .where(
-        and(
-          eq(schema.seasons.teamId, teamId),
-          eq(schema.seasons.isCurrent, true)
-        )
-      )
+      .where(and(eq(schema.seasons.teamId, teamId), eq(schema.seasons.isCurrent, true)))
       .limit(1);
 
     return season || null;
@@ -190,10 +185,7 @@ export class SeasonService {
    * @param scrapedFixtures - Fixtures from the latest scrape
    * @returns True iff every previously scraped (upcoming) fixture is absent from the latest scrape
    */
-  async shouldCreateNewSeason(
-    teamId: number,
-    scrapedFixtures: Fixture[]
-  ): Promise<boolean> {
+  async shouldCreateNewSeason(teamId: number, scrapedFixtures: Fixture[]): Promise<boolean> {
     // No new fixtures → off-season/transient blip, never a transition.
     if (scrapedFixtures.length === 0) {
       return false;
@@ -208,21 +200,14 @@ export class SeasonService {
     const previousGames = await this.db
       .select()
       .from(schema.games)
-      .where(
-        and(
-          eq(schema.games.seasonId, current.id),
-          eq(schema.games.status, 'upcoming')
-        )
-      );
+      .where(and(eq(schema.games.seasonId, current.id), eq(schema.games.status, 'upcoming')));
 
     if (previousGames.length === 0) {
       return false;
     }
 
     // A new season iff NONE of the previously scraped fixtures still appear.
-    const scrapedKeys = new Set(
-      scrapedFixtures.map((f) => this.fixtureKey(f.opponent, f.date))
-    );
+    const scrapedKeys = new Set(scrapedFixtures.map((f) => this.fixtureKey(f.opponent, f.date)));
     const anyStillPresent = previousGames.some((g) =>
       scrapedKeys.has(this.fixtureKey(g.opponent, this.toDateKey(g.gameDate)))
     );

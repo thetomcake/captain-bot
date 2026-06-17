@@ -19,9 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Read version from package.json
-const packageJson = JSON.parse(
-  readFileSync(join(__dirname, '../../package.json'), 'utf-8')
-);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
 const VERSION = packageJson.version;
 
 async function main(): Promise<void> {
@@ -106,7 +104,7 @@ async function main(): Promise<void> {
         console.log('Options:');
         console.log('  --all              Show all fixtures (including completed)');
         console.log('  --season <number>  Show fixtures for specific season');
-        console.log('  --show-responses   List each fixture\'s recorded poll responses');
+        console.log("  --show-responses   List each fixture's recorded poll responses");
         console.log('  --json             Output in JSON format');
         console.log('  --config <path>    Config file path');
         console.log('  --help             Show this help message');

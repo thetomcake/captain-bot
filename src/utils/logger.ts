@@ -57,7 +57,8 @@ class Logger {
     const formatted = this.formatMessage(level, message, meta);
 
     if (this.consoleEnabled) {
-      const consoleMethod = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+      const consoleMethod =
+        level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
       consoleMethod(formatted);
     }
 

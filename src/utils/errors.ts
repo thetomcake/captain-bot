@@ -84,9 +84,7 @@ export class AuthError extends AppError {
  */
 export class NotFoundError extends AppError {
   constructor(resource: string, identifier?: string) {
-    const message = identifier
-      ? `${resource} not found: ${identifier}`
-      : `${resource} not found`;
+    const message = identifier ? `${resource} not found: ${identifier}` : `${resource} not found`;
     super(message, 'NOT_FOUND', 1);
   }
 }

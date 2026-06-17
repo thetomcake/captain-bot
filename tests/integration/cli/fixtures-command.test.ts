@@ -36,18 +36,24 @@ describe('CLI Fixtures Command Tests', () => {
     migrate(db, { migrationsFolder });
 
     // Create test team
-    const [team] = await db.insert(schema.teams).values({
-      name: 'Test Team',
-      clubUrl: 'https://manvfatfootball.com/club/watford/',
-      whatsappGroupId: null,
-    }).returning();
+    const [team] = await db
+      .insert(schema.teams)
+      .values({
+        name: 'Test Team',
+        clubUrl: 'https://manvfatfootball.com/club/watford/',
+        whatsappGroupId: null,
+      })
+      .returning();
 
     // Create test season
-    const [season] = await db.insert(schema.seasons).values({
-      teamId: team.id,
-      seasonNumber: 1,
-      isCurrent: true,
-    }).returning();
+    const [season] = await db
+      .insert(schema.seasons)
+      .values({
+        teamId: team.id,
+        seasonNumber: 1,
+        isCurrent: true,
+      })
+      .returning();
 
     // Insert test fixtures
     const futureDate1 = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now

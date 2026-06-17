@@ -3,7 +3,9 @@ import { relations, sql } from 'drizzle-orm';
 
 // Timestamp helper for consistent timestamp handling
 const timestamp = (name: string) =>
-  integer(name, { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`);
+  integer(name, { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`);
 
 // ============================================================================
 // TEAMS

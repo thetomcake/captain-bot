@@ -133,10 +133,7 @@ describe('CLI Poll Command (Gateway-native)', () => {
     });
 
     it('exits 1 when re-fetch yields no confirmed next fixture (FR-028)', async () => {
-      await pollCommand(
-        {},
-        { gateway, fixtureService: fixtureServiceWith(PLACEHOLDER_ONLY_HTML) }
-      );
+      await pollCommand({}, { gateway, fixtureService: fixtureServiceWith(PLACEHOLDER_ONLY_HTML) });
 
       expect(exitCode).toBe(1);
       expect(gateway.sentPolls).toHaveLength(0);

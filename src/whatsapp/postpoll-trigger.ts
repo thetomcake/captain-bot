@@ -71,9 +71,13 @@ export function createPostPollHandler(
       // A re-trigger force-replaces the prior poll (FR-027/FR-029).
       result = await pollService.postOrReplaceNextPoll({ force: true });
     } catch (error) {
-      logger.error('!postpoll handler failed', error instanceof Error ? error : new Error(String(error)), {
-        sender: message.sender.canonicalId,
-      });
+      logger.error(
+        '!postpoll handler failed',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          sender: message.sender.canonicalId,
+        }
+      );
       return;
     }
 

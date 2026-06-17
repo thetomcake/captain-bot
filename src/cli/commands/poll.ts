@@ -44,12 +44,16 @@ export async function pollCommand(
       return;
     }
 
-    const fixtureService =
-      deps.fixtureService ?? new FixtureService(db, new SeasonService(db));
+    const fixtureService = deps.fixtureService ?? new FixtureService(db, new SeasonService(db));
 
     // Dry run — re-fetch + preview, send nothing.
     if (options.dryRun) {
-      const previewService = new PollService(db, fixtureService, deps.gateway as IWhatsAppGateway, groupId);
+      const previewService = new PollService(
+        db,
+        fixtureService,
+        deps.gateway as IWhatsAppGateway,
+        groupId
+      );
       const preview = await previewService.previewNextPoll();
       if (preview.outcome === 'fetch-failed') {
         console.error(`Could not reach the club site: ${preview.error}`);

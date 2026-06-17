@@ -87,9 +87,7 @@ export class StatService {
   }
 
   /** Shared join + projection for the two read queries above. */
-  private async selectStatLines(
-    where: ReturnType<typeof eq>
-  ): Promise<PlayerStatLine[]> {
+  private async selectStatLines(where: ReturnType<typeof eq>): Promise<PlayerStatLine[]> {
     const rows = await this.db
       .select({
         canonicalId: schema.whatsappUsers.canonicalId,

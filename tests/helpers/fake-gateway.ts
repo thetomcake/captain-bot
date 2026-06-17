@@ -34,10 +34,22 @@ export interface SentMessage {
 
 /** Canonical Identity fixtures so identity-keyed assertions (SC-008) are exercised. */
 export const IDENTITIES = {
-  alice: { canonicalId: '447700900001@s.whatsapp.net', pn: '447700900001@s.whatsapp.net', displayHint: 'Alice' },
-  bob: { canonicalId: '447700900002@s.whatsapp.net', pn: '447700900002@s.whatsapp.net', displayHint: 'Bob' },
+  alice: {
+    canonicalId: '447700900001@s.whatsapp.net',
+    pn: '447700900001@s.whatsapp.net',
+    displayHint: 'Alice',
+  },
+  bob: {
+    canonicalId: '447700900002@s.whatsapp.net',
+    pn: '447700900002@s.whatsapp.net',
+    displayHint: 'Bob',
+  },
   // Same person as alice, arriving under the LID address form — must collapse to one row.
-  aliceLid: { canonicalId: '447700900001@s.whatsapp.net', lid: '111111111111111@lid', displayHint: 'Alice' },
+  aliceLid: {
+    canonicalId: '447700900001@s.whatsapp.net',
+    lid: '111111111111111@lid',
+    displayHint: 'Alice',
+  },
 } satisfies Record<string, Identity>;
 
 export const TEST_GROUP_ID = '120363000000000000@g.us';

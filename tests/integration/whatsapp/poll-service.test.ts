@@ -22,10 +22,7 @@ describe('PollService (Gateway-native)', () => {
   let teamId: number;
 
   /** Build a PollVote delta for the most-recently-posted poll. */
-  function voteFor(
-    voter: PollVote['voter'],
-    selectedOptions: string[]
-  ): PollVote {
+  function voteFor(voter: PollVote['voter'], selectedOptions: string[]): PollVote {
     const sent = gateway.sentPolls[gateway.sentPolls.length - 1]!;
     return {
       pollId: sent.keyset.pollId,

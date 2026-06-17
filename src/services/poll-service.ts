@@ -13,12 +13,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
 import type { FixtureService } from './fixture-service.js';
 import type { Game, Poll, Season } from '../types/entities.js';
-import type {
-  IWhatsAppGateway,
-  Identity,
-  MessageRef,
-  PollVote,
-} from '../whatsapp/gateway-port.js';
+import type { IWhatsAppGateway, Identity, MessageRef, PollVote } from '../whatsapp/gateway-port.js';
 import { KeysetStore } from '../whatsapp/keyset-store.js';
 import { buildPollSpec, getPollOptions } from '../whatsapp/poll-presenter.js';
 import { logger } from '../utils/logger.js';
@@ -76,7 +71,8 @@ export class PollService {
   ) {}
 
   private get fixtures(): FixtureService {
-    if (!this.fixtureService) throw new Error('PollService: fixtureService required for poll posting');
+    if (!this.fixtureService)
+      throw new Error('PollService: fixtureService required for poll posting');
     return this.fixtureService;
   }
 
@@ -156,10 +152,7 @@ export class PollService {
       .select()
       .from(schema.polls)
       .where(
-        and(
-          eq(schema.polls.pollMessageId, vote.pollId),
-          eq(schema.polls.groupId, vote.groupId)
-        )
+        and(eq(schema.polls.pollMessageId, vote.pollId), eq(schema.polls.groupId, vote.groupId))
       )
       .limit(1);
     if (!poll) return;
@@ -171,10 +164,7 @@ export class PollService {
       await this.db
         .delete(schema.pollResponses)
         .where(
-          and(
-            eq(schema.pollResponses.pollId, poll.id),
-            eq(schema.pollResponses.userId, user.id)
-          )
+          and(eq(schema.pollResponses.pollId, poll.id), eq(schema.pollResponses.userId, user.id))
         );
       return;
     }
@@ -185,10 +175,7 @@ export class PollService {
       .select()
       .from(schema.pollResponses)
       .where(
-        and(
-          eq(schema.pollResponses.pollId, poll.id),
-          eq(schema.pollResponses.userId, user.id)
-        )
+        and(eq(schema.pollResponses.pollId, poll.id), eq(schema.pollResponses.userId, user.id))
       )
       .limit(1);
 
@@ -267,7 +254,8 @@ export class PollService {
     const optionOrder = getPollOptions();
     for (const entry of byGame.values()) {
       entry.responses.sort((a, b) => {
-        const byOption = optionOrder.indexOf(a.selectedOption) - optionOrder.indexOf(b.selectedOption);
+        const byOption =
+          optionOrder.indexOf(a.selectedOption) - optionOrder.indexOf(b.selectedOption);
         if (byOption !== 0) return byOption;
         return (a.displayName ?? a.canonicalId).localeCompare(b.displayName ?? b.canonicalId);
       });
@@ -290,7 +278,10 @@ export class PollService {
     try {
       await this.fixtures.syncFixtures(team.id);
     } catch (error) {
-      return { kind: 'fetch-failed', error: error instanceof Error ? error.message : String(error) };
+      return {
+        kind: 'fetch-failed',
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
 
     const season = await this.getCurrentSeason(team.id);
@@ -328,9 +319,7 @@ export class PollService {
    * never block the replacement (the Gateway's `deleteMessage` never throws).
    */
   private async removeExistingPoll(poll: Poll): Promise<void> {
-    await this.db
-      .delete(schema.pollResponses)
-      .where(eq(schema.pollResponses.pollId, poll.id));
+    await this.db.delete(schema.pollResponses).where(eq(schema.pollResponses.pollId, poll.id));
     await this.db.delete(schema.polls).where(eq(schema.polls.id, poll.id));
 
     const outcome = await this.wa.deleteMessage({

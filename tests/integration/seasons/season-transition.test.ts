@@ -3,10 +3,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '#src/database/schema.js';
 import { FixtureService } from '#src/services/fixture-service.js';
 import { SeasonService } from '#src/services/season-service.js';
-import {
-  IFixtureScraper,
-  Fixture,
-} from '#src/scraping/fixture-scraper.js';
+import { IFixtureScraper, Fixture } from '#src/scraping/fixture-scraper.js';
 import { createTestDatabase, TestDatabase } from '../../helpers/test-database.js';
 
 /**
@@ -24,13 +21,31 @@ class StubScraper implements IFixtureScraper {
 }
 
 const SEASON_ONE: Fixture[] = [
-  { date: '2026-01-10', time: '19:00', opponent: 'Old Town FC', venue: 'Arena A', status: 'upcoming' },
+  {
+    date: '2026-01-10',
+    time: '19:00',
+    opponent: 'Old Town FC',
+    venue: 'Arena A',
+    status: 'upcoming',
+  },
   { date: '2026-01-17', time: '19:00', opponent: 'Old City', venue: 'Arena A', status: 'upcoming' },
 ];
 
 const SEASON_TWO: Fixture[] = [
-  { date: '2026-09-05', time: '19:00', opponent: 'New United', venue: 'Arena B', status: 'upcoming' },
-  { date: '2026-09-12', time: '19:00', opponent: 'New Rovers', venue: 'Arena B', status: 'upcoming' },
+  {
+    date: '2026-09-05',
+    time: '19:00',
+    opponent: 'New United',
+    venue: 'Arena B',
+    status: 'upcoming',
+  },
+  {
+    date: '2026-09-12',
+    time: '19:00',
+    opponent: 'New Rovers',
+    venue: 'Arena B',
+    status: 'upcoming',
+  },
 ];
 
 describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
