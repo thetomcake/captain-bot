@@ -66,14 +66,55 @@ describe('normaliseOurFixtures (C2)', () => {
     });
   });
 
-  describe('FR-002 (provisional) — year anchored to today within a single calendar year', () => {
-    it('assigns today’s year to the week month/day as an ISO date', () => {
+  describe('FR-002 — year from page order anchored to today', () => {
+    it('assigns today’s year to the week month/day within a single calendar year', () => {
       const { fixtures } = normaliseOurFixtures(
         [fix({ homeTeam: 'White Team', awayTeam: 'Green Team', month: 11, day: 9 })],
         TEAM,
         TODAY
       );
       expect(fixtures[0]?.date).toBe('2026-11-09');
+    });
+
+    it('rolls the year over when the month wraps December -> January (page order)', () => {
+      const lateDecember = new Date(2026, 11, 20); // 20 Dec 2026
+      const { fixtures } = normaliseOurFixtures(
+        [
+          fix({ homeTeam: 'White Team', awayTeam: 'Red team', month: 12, day: 28 }),
+          fix({ homeTeam: 'Blue team', awayTeam: 'White Team', month: 1, day: 4 }),
+        ],
+        TEAM,
+        lateDecember
+      );
+      expect(fixtures.map((f) => f.date)).toEqual(['2026-12-28', '2027-01-04']);
+    });
+
+    it('detects the wrap even when the lower-month week belongs to another team', () => {
+      const lateDecember = new Date(2026, 11, 20);
+      const { fixtures } = normaliseOurFixtures(
+        [
+          fix({ homeTeam: 'White Team', awayTeam: 'Red team', month: 12, day: 28 }), // ours (Dec)
+          fix({ homeTeam: 'Blue team', awayTeam: 'Green Team', month: 1, day: 4 }), // other team's Jan
+          fix({ homeTeam: 'White Team', awayTeam: 'Yellow Team', month: 1, day: 11 }), // ours (Jan)
+        ],
+        TEAM,
+        lateDecember
+      );
+      // The Jan rollover is triggered by the filtered-out Blue v Green week, so our Jan 11 game
+      // is correctly placed in the next year.
+      expect(fixtures.map((f) => f.date)).toEqual(['2026-12-28', '2027-01-11']);
+    });
+
+    it('does not roll the year over for a normal ascending month sequence', () => {
+      const { fixtures } = normaliseOurFixtures(
+        [
+          fix({ homeTeam: 'White Team', awayTeam: 'Red team', month: 11, day: 9 }),
+          fix({ homeTeam: 'White Team', awayTeam: 'Green Team', month: 12, day: 7 }),
+        ],
+        TEAM,
+        TODAY
+      );
+      expect(fixtures.map((f) => f.date)).toEqual(['2026-11-09', '2026-12-07']);
     });
 
     it('carries time, venue and status through unchanged', () => {

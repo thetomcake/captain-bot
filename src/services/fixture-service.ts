@@ -86,6 +86,18 @@ export class FixtureService {
   }
 
   /**
+   * Fetch the club page for a team and reduce it to our-team fixtures: resolve the (injected or
+   * team-scoped) scraper, fetch the HTML, parse it, and normalise to {@link OurFixture}s (deriving
+   * opponent + ISO date and emitting the FR-005 mismatch log). The single load path shared by
+   * `fetchFixtures`, `syncFixtures`, and `detectFixtureChanges`.
+   */
+  private async scrapeOurFixtures(team: Team): Promise<OurFixture[]> {
+    const scraper = this.getScraper(team);
+    const html = await scraper.fetchHtml(team.clubUrl);
+    return this.normaliseScraped(scraper.parseFixtures(html));
+  }
+
+  /**
    * Resolve the scraper for an operation. With an injected scraper (tests) it is returned
    * as-is. Otherwise a team-scoped {@link DefaultFixtureScraper} is built: it wraps a
    * {@link ManvfatSession} seeded from the team's stored credentials + cookie, with a
@@ -126,9 +138,7 @@ export class FixtureService {
     const season = await this.seasonService.getOrCreateCurrentSeason(teamId);
 
     // Scrape fixtures from club URL using the team-scoped (or injected) scraper
-    const scraper = this.getScraper(team);
-    const html = await scraper.fetchHtml(team.clubUrl);
-    const ourFixtures = this.normaliseScraped(scraper.parseFixtures(html));
+    const ourFixtures = await this.scrapeOurFixtures(team);
 
     return this.persistScrapedFixtures(team, season, ourFixtures);
   }
@@ -224,9 +234,7 @@ export class FixtureService {
   async syncFixtures(teamId: number): Promise<SyncResult> {
     const team = await this.getTeam(teamId);
 
-    const scraper = this.getScraper(team);
-    const html = await scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = this.normaliseScraped(scraper.parseFixtures(html));
+    const scrapedFixtures = await this.scrapeOurFixtures(team);
 
     const seasonTransition = await this.seasonService.shouldCreateNewSeason(
       teamId,
@@ -351,10 +359,8 @@ export class FixtureService {
       throw new Error(`Team not found: ${teamId}`);
     }
 
-    // Scrape current fixtures using the team-scoped (or injected) scraper, reduced to our team.
-    const scraper = this.getScraper(team);
-    const html = await scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = this.normaliseScraped(scraper.parseFixtures(html));
+    // Scrape current fixtures (team-scoped or injected scraper), reduced to our team.
+    const scrapedFixtures = await this.scrapeOurFixtures(team);
 
     const changes: FixtureChanges = {
       added: [],

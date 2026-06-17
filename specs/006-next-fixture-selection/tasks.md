@@ -29,6 +29,27 @@ Single project: `src/`, `tests/` at repo root (per plan.md Structure Decision). 
 
 ---
 
+## Ad-hoc / out-of-phase changes (post-Phase-3 review, 2026-06-17)
+
+Decisions taken during a review after Phases 1–3 shipped — recorded here so the phase plan stays
+honest:
+
+1. **Year-boundary fix pulled forward (T010 + T012 done early).** The Dec→Jan page-order year
+   assignment (FR-002, originally Phase 4 / US2) was implemented during the Phase-3 review because it
+   is a small, self-contained change to the already-built normaliser. Unit tests cover it (T010).
+   The US2 **integration** test (T011) is **still outstanding**.
+2. **`fetchFixtures` vs `syncFixtures` duplication left as-is, by design.** The two methods overlap
+   (both scrape→normalise→`persistScrapedFixtures`); `syncFixtures` only adds the auto season-transition
+   branch + `SyncResult`. **T019 (Phase 6) removes that branch**, at which point the two converge and
+   should be consolidated into one method. We deliberately do **not** merge them now — Phase 6 will
+   reshape `syncFixtures` anyway. See T019.
+3. **`scrapeOurFixtures` helper extracted (part of T022, done early).** The three identical
+   getScraper→fetchHtml→parse→normalise call-sites in `fixture-service.ts` (`fetchFixtures`,
+   `syncFixtures`, `detectFixtureChanges`) were collapsed into one private `scrapeOurFixtures(team)`
+   method. No behavioural change.
+
+---
+
 ## Phase 1: Setup (Shared Infrastructure)
 
 **Purpose**: Establish the regression baseline before any change (SC-007).
@@ -92,14 +113,16 @@ fixture; when the Dec game shows a score and January is still `-`, January is se
 
 ### Tests for User Story 2 (write FIRST, ensure they FAIL) ⚠️
 
-- [ ] T010 [P] [US2] FAILING unit tests in `tests/unit/scrapers/fixture-normaliser.test.ts` (extend): with `today` in late December and weeks running December→January in page order, `normaliseOurFixtures` assigns December the current year and January the next year (increment on month wrap), independent of any per-month guess (FR-002).
-- [ ] T011 [P] [US2] FAILING integration tests in `tests/integration/fixtures/year-boundary-us2.test.ts`: late-Dec `today`, Dec + Jan unplayed → Dec selected as next, Jan recognised as later future (US2 AS1); Dec now played (score) + Jan unplayed → Jan selected (US2 AS2); chronological ordering correct across 31 Dec → 1 Jan (US2 AS3/SC-003).
+- [X] T010 [P] [US2] Unit tests in `tests/unit/scrapers/fixture-normaliser.test.ts` (extend): with `today` in late December and weeks running December→January in page order, `normaliseOurFixtures` assigns December the current year and January the next year (increment on month wrap), independent of any per-month guess (FR-002). **Done ad-hoc alongside Phase 3 (see "Ad-hoc changes" below) — also covers wrap-on-a-filtered-out-week and the no-wrap ascending case.**
+- [ ] T011 [P] [US2] FAILING integration tests in `tests/integration/fixtures/year-boundary-us2.test.ts`: late-Dec `today`, Dec + Jan unplayed → Dec selected as next, Jan recognised as later future (US2 AS1); Dec now played (score) + Jan unplayed → Jan selected (US2 AS2); chronological ordering correct across 31 Dec → 1 Jan (US2 AS3/SC-003). **STILL PENDING** — the T012 fix has unit coverage (T010); the end-to-end integration test through `fetchFixtures` remains to be written when Phase 4 is picked up.
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Add chronological year assignment to `src/scraping/fixture-normaliser.ts`: walk the parsed weeks in page order, anchor the year to `today`, and increment the year whenever a week's month is lower than the previous week's month (Dec→Jan wrap), replacing the provisional year from T007 (FR-002, research §2). (Modifies the file created in T007 — depends on US1.)
+- [X] T012 [US2] Add chronological year assignment to `src/scraping/fixture-normaliser.ts`: walk the parsed weeks in page order, anchor the year to `today`, and increment the year whenever a week's month is lower than the previous week's month (Dec→Jan wrap), replacing the provisional year from T007 (FR-002, research §2). (Modifies the file created in T007 — depends on US1.) **Done ad-hoc alongside Phase 3 — `previousMonth` is tracked across ALL parsed weeks so a wrap on a filtered-out (other-team) week is still detected.**
 
 **Checkpoint**: US1 + US2 work — selection correct within a year and across the Dec→Jan boundary.
+**Status**: year-assignment logic + unit tests done ad-hoc (T010/T012); only the US2 integration
+test (T011) remains.
 
 ---
 
@@ -145,7 +168,7 @@ may start right after Phase 1.
 
 - [ ] T017 [US4] Create `src/cli/commands/end-of-season.ts`: resolve current season (teamId 1); if none → message + no change + exit 0; else display the season number and confirm via injectable `deps.confirm?: () => Promise<boolean>` (default reads y/N from stdin), bypassed by `--yes`/`--force`; on proceed call `SeasonService.endSeason(season.id)`; support `--json`; exit codes per `contracts/cli-end-of-season.md` (FR-010/FR-013). Any settings needed are read via the loaded config (`getEnv()`), not direct `process.env` access (Clarifications).
 - [ ] T018 [US4] Register the `end-of-season` command in `src/cli/index.ts`: route to `endOfSeasonCommand`, parse `--yes`/`--force`/`--json`, add command-level `--help`, and add it to the usage/commands list.
-- [ ] T019 [US4] Retire the automatic season transition in `src/services/fixture-service.ts`: remove the `shouldCreateNewSeason` → `createNewSeason` branch from `syncFixtures` so it only fetches + persists into the current season via `getOrCreateCurrentSeason`; adjust `SyncResult` (drop or always-false `seasonTransition`/`newSeasonNumber`) (FR-011). (Same file as T008 — different method; coordinate edits.)
+- [ ] T019 [US4] Retire the automatic season transition in `src/services/fixture-service.ts`: remove the `shouldCreateNewSeason` → `createNewSeason` branch from `syncFixtures` so it only fetches + persists into the current season via `getOrCreateCurrentSeason`; adjust `SyncResult` (drop or always-false `seasonTransition`/`newSeasonNumber`) (FR-011). (Same file as T008 — different method; coordinate edits.) **Convergence point: once the transition branch is gone, `syncFixtures` and `fetchFixtures` do the same thing (both `scrapeOurFixtures` → `persistScrapedFixtures` into the current season) — consolidate them into a single method here and update the two callers (`sync` command, `PollService.resolveNextFixture`). This is why the post-Phase-3 review left the duplication in place (see "Ad-hoc changes").**
 - [ ] T020 [US4] Update `src/cli/commands/sync.ts` to stop announcing season transitions (consume the adjusted `SyncResult`); verify lazy new-season creation still occurs on fetch (FR-012).
 - [ ] T021 [US4] Retire `SeasonService.shouldCreateNewSeason` (and its helpers `fixtureKey`/`toDateKey` if now unused) from `src/services/season-service.ts`, and remove/retire its dedicated 003 tests so the suite reflects manual-only rollover (FR-011). Leave `endSeason`/`getOrCreateCurrentSeason`/`createNewSeason` intact.
 

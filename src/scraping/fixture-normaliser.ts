@@ -45,13 +45,16 @@ function toIsoDate(year: number, month: number, day: number): string {
  * - **FR-001 filter**: keep only fixtures where `teamName` is the home or away side, compared
  *   whitespace-normalised + case-insensitively; discard all other-team pairings.
  * - **FR-003 opponent**: the opponent is the side that is NOT our team, whether we are home or away.
- * - **FR-002 year (provisional)**: every fixture is assigned `today`'s calendar year. This is correct
- *   within a single calendar year (US1); the boundary-correct page-order assignment (December ->
- *   January wrap) is layered on in US2 (T012). It deliberately does NOT guess a year per month.
+ * - **FR-002 year**: the club page lists weeks in chronological page order, so the calendar year
+ *   follows deterministically from the sequence and a single anchor. The first week is anchored to
+ *   `today`'s year; thereafter the year increments whenever a week's month is **lower than the
+ *   previous week's month** (e.g. December -> January), which is the only signal of a year rollover.
+ *   It deliberately does NOT guess a year per month. The previous-week month is tracked across ALL
+ *   parsed weeks (not just our-team ones), so a wrap on a week we filter out is still detected.
  * - **FR-005 mismatch**: surfaces `leagueFixturesButNoneOurs` so the caller can log a likely
  *   `TEAM_NAME` mismatch and treat the scrape as yielding no fixtures.
  *
- * @param parsed - faithful league rows from `scrapeFixtures`
+ * @param parsed - faithful league rows from `scrapeFixtures`, in page (chronological) order
  * @param teamName - our team's name (from the loaded config)
  * @param today - anchor date for year assignment (injectable for deterministic tests)
  */
@@ -61,10 +64,19 @@ export function normaliseOurFixtures(
   today: Date
 ): NormaliseResult {
   const target = normalise(teamName);
-  const year = today.getFullYear();
+
+  // Walk the weeks in page order, carrying the year forward and rolling it over on a month wrap.
+  let year = today.getFullYear();
+  let previousMonth: number | null = null;
 
   const fixtures: OurFixture[] = [];
   for (const f of parsed) {
+    // A month lower than the previous week's means the calendar year has rolled over (FR-002).
+    if (previousMonth !== null && f.month < previousMonth) {
+      year += 1;
+    }
+    previousMonth = f.month;
+
     const homeMatches = normalise(f.homeTeam) === target;
     const awayMatches = normalise(f.awayTeam) === target;
 
