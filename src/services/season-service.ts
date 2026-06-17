@@ -2,7 +2,7 @@ import { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '../database/schema.js';
 import { Season } from '../types/entities.js';
-import { Fixture } from '../scraping/fixture-scraper.js';
+import { OurFixture } from '../scraping/fixture-normaliser.js';
 
 export class SeasonService {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
@@ -185,7 +185,7 @@ export class SeasonService {
    * @param scrapedFixtures - Fixtures from the latest scrape
    * @returns True iff every previously scraped (upcoming) fixture is absent from the latest scrape
    */
-  async shouldCreateNewSeason(teamId: number, scrapedFixtures: Fixture[]): Promise<boolean> {
+  async shouldCreateNewSeason(teamId: number, scrapedFixtures: OurFixture[]): Promise<boolean> {
     // No new fixtures → off-season/transient blip, never a transition.
     if (scrapedFixtures.length === 0) {
       return false;

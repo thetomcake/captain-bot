@@ -4,8 +4,9 @@ import * as schema from '../database/schema.js';
 import { Game, GameStatus, Season } from '../types/entities.js';
 import { SeasonService } from './season-service.js';
 import { IFixtureScraper, DefaultFixtureScraper } from '../scraping/fixture-scraper.js';
+import { normaliseOurFixtures, OurFixture } from '../scraping/fixture-normaliser.js';
 import { ManvfatSession } from '../scraping/manvfat-session.js';
-import { getCredentialKey } from '../config/env.js';
+import { getCredentialKey, getEnv } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
 type Team = typeof schema.teams.$inferSelect;
@@ -41,12 +42,47 @@ export class FixtureService {
    */
   private injectedScraper?: IFixtureScraper;
 
+  /**
+   * Clock seam. Year assignment (FR-002) and the future-date selection guard (FR-008) are
+   * time-relative, so "now" is injectable — production uses the real clock; tests pass a fixed
+   * value to make the year-boundary and score-lag scenarios deterministic against static fixtures.
+   */
+  private readonly now: () => Date;
+
   constructor(
     private db: BetterSQLite3Database<typeof schema>,
     private seasonService: SeasonService,
-    scraper?: IFixtureScraper
+    scraper?: IFixtureScraper,
+    now: () => Date = () => new Date()
   ) {
     this.injectedScraper = scraper;
+    this.now = now;
+  }
+
+  /**
+   * Reduce a freshly scraped league list to our-team fixtures (derived opponent + ISO date),
+   * filtering by the configured team name and anchoring the year to "now" (FR-001/002/003). When
+   * the scrape held league fixtures but none feature our team, logs the FR-005 likely-mismatch
+   * signal (counts only — never credentials/cookies) so the operator can spot a `TEAM_NAME`
+   * misconfiguration; the caller then proceeds with an empty set ("no confirmed next fixture").
+   */
+  private normaliseScraped(scraped: ReturnType<IFixtureScraper['parseFixtures']>): OurFixture[] {
+    const teamName = getEnv().teamName;
+    const { fixtures, leagueFixturesButNoneOurs } = normaliseOurFixtures(
+      scraped,
+      teamName,
+      this.now()
+    );
+
+    if (leagueFixturesButNoneOurs) {
+      logger.warn(
+        'Scraped league fixtures but none feature our team — likely TEAM_NAME mismatch; ' +
+          'no confirmed next fixture.',
+        { scraped: scraped.length, matched: 0, teamName }
+      );
+    }
+
+    return fixtures;
   }
 
   /**
@@ -92,9 +128,9 @@ export class FixtureService {
     // Scrape fixtures from club URL using the team-scoped (or injected) scraper
     const scraper = this.getScraper(team);
     const html = await scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = scraper.parseFixtures(html);
+    const ourFixtures = this.normaliseScraped(scraper.parseFixtures(html));
 
-    return this.persistScrapedFixtures(team, season, scrapedFixtures);
+    return this.persistScrapedFixtures(team, season, ourFixtures);
   }
 
   /**
@@ -190,7 +226,7 @@ export class FixtureService {
 
     const scraper = this.getScraper(team);
     const html = await scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = scraper.parseFixtures(html);
+    const scrapedFixtures = this.normaliseScraped(scraper.parseFixtures(html));
 
     const seasonTransition = await this.seasonService.shouldCreateNewSeason(
       teamId,
@@ -240,9 +276,7 @@ export class FixtureService {
    * @param seasonId - Season ID
    * @returns Array of upcoming games
    */
-  async getUpcomingFixtures(seasonId: number): Promise<Game[]> {
-    const now = new Date();
-
+  async getUpcomingFixtures(seasonId: number, now: Date = this.now()): Promise<Game[]> {
     return await this.db
       .select()
       .from(schema.games)
@@ -317,10 +351,10 @@ export class FixtureService {
       throw new Error(`Team not found: ${teamId}`);
     }
 
-    // Scrape current fixtures using the team-scoped (or injected) scraper
+    // Scrape current fixtures using the team-scoped (or injected) scraper, reduced to our team.
     const scraper = this.getScraper(team);
     const html = await scraper.fetchHtml(team.clubUrl);
-    const scrapedFixtures = scraper.parseFixtures(html);
+    const scrapedFixtures = this.normaliseScraped(scraper.parseFixtures(html));
 
     const changes: FixtureChanges = {
       added: [],

@@ -10,6 +10,7 @@ import { SeasonService } from '#src/services/season-service.js';
 import { MockFixtureScraper } from '../../helpers/mock-scraper.js';
 import { FakeGateway } from '../../helpers/fake-gateway.js';
 import { createTestConfig, setTestEnvironment } from '../../helpers/test-config.js';
+import { reloadEnv } from '#src/config/env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,9 +47,16 @@ describe('CLI Poll Command (Gateway-native)', () => {
   }
 
   beforeEach(async () => {
+    // Our team must match a side in the static Watford HTML so the re-fetch resolves a next
+    // fixture (spec 006 filters scraped fixtures to TEAM_NAME). "White Team" has upcoming games.
     setTestEnvironment(
-      createTestConfig({ databasePath: ':memory:', authorizedGroupId: 'test-group@g.us' })
+      createTestConfig({
+        databasePath: ':memory:',
+        authorizedGroupId: 'test-group@g.us',
+        teamName: 'White Team',
+      })
     );
+    reloadEnv();
 
     closeDatabase();
     const { db } = getDatabase();

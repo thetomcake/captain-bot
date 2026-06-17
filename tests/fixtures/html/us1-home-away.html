@@ -1,0 +1,85 @@
+<!--
+  Static fixture for US1 (spec 006). Trimmed clone of the MAN v FAT club page markup
+  (.group-header.white + table.fixture-table + tr.no-highlight + td.game-week-no/team-name/score).
+
+  Single calendar year (November) — NO year boundary. Designed so:
+    - The earliest LEAGUE game (Week 1, Blue v Red) is NOT our team's game (US1 AS1).
+    - We are HOME in one game (Week 2, opponent = Green Team) — US1 AS2.
+    - We are AWAY in another (Week 3, opponent = Yellow Team) — US1 AS3.
+  Our team is "White Team". All fixtures unplayed (scores "-"). Use a fixed `today` of early Nov.
+-->
+<html>
+  <body class="logged-in">
+    <div class="col">
+      <div class="mod">
+        <div class="group-header white">Week 1 - November 2nd</div>
+        <div class="responsive-table">
+          <table class="fixture-table">
+            <tr class="title no-highlight">
+              <td class="title">Game</td>
+              <td class="title">Home Team</td>
+              <td class="title" colspan="3"></td>
+              <td class="title">Away Team</td>
+            </tr>
+            <tr class="no-highlight">
+              <td class="game-week-no" rowspan="1">19:00<br>League</td>
+              <td class="team-name"><span class="colourbox blue"></span> Blue team</td>
+              <td class="score home neutral">-</td>
+              <td class="versus">v</td>
+              <td class="score away neutral">-</td>
+              <td class="team-name"><span class="colourbox red"></span> Red team</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="mod">
+        <div class="group-header white">Week 2 - November 9th</div>
+        <div class="responsive-table">
+          <table class="fixture-table">
+            <tr class="title no-highlight">
+              <td class="title">Game</td>
+              <td class="title">Home Team</td>
+              <td class="title" colspan="3"></td>
+              <td class="title">Away Team</td>
+            </tr>
+            <tr class="no-highlight">
+              <td class="game-week-no" rowspan="1">19:30<br>League</td>
+              <td class="team-name"><span class="colourbox white"></span> White Team</td>
+              <td class="score home neutral">-</td>
+              <td class="versus">v</td>
+              <td class="score away neutral">-</td>
+              <td class="team-name"><span class="colourbox green"></span> Green Team</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="mod">
+        <div class="group-header white">Week 3 - November 16th</div>
+        <div class="responsive-table">
+          <table class="fixture-table">
+            <tr class="title no-highlight">
+              <td class="title">Game</td>
+              <td class="title">Home Team</td>
+              <td class="title" colspan="3"></td>
+              <td class="title">Away Team</td>
+            </tr>
+            <tr class="no-highlight">
+              <td class="game-week-no" rowspan="1">20:00<br>League</td>
+              <td class="team-name"><span class="colourbox yellow"></span> Yellow Team</td>
+              <td class="score home neutral">-</td>
+              <td class="versus">v</td>
+              <td class="score away neutral">-</td>
+              <td class="team-name"><span class="colourbox white"></span> White Team</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

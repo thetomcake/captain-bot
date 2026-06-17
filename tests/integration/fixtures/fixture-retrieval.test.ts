@@ -12,6 +12,8 @@ import { SeasonService } from '#src/services/season-service.js';
 
 // Import mock scraper (no real HTTP calls)
 import { MockFixtureScraper } from '../../helpers/mock-scraper.js';
+import { createTestConfig, setTestEnvironment } from '../../helpers/test-config.js';
+import { reloadEnv } from '#src/config/env.js';
 
 describe('Fixture Service Integration Tests', () => {
   let db: ReturnType<typeof drizzle>;
@@ -22,6 +24,11 @@ describe('Fixture Service Integration Tests', () => {
   let seasonId: number;
 
   beforeEach(async () => {
+    // Spec 006 filters scraped fixtures to TEAM_NAME; "White Team" appears in the static Watford
+    // HTML (with upcoming games), so the load path yields our-team fixtures deterministically.
+    setTestEnvironment(createTestConfig({ teamName: 'White Team' }));
+    reloadEnv();
+
     // Use in-memory database for testing
     sqlite = new Database(':memory:');
     db = drizzle(sqlite, { schema });

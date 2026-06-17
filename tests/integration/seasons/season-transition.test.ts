@@ -4,11 +4,15 @@ import * as schema from '#src/database/schema.js';
 import { FixtureService } from '#src/services/fixture-service.js';
 import { SeasonService } from '#src/services/season-service.js';
 import { IFixtureScraper, Fixture } from '#src/scraping/fixture-scraper.js';
+import { normaliseOurFixtures } from '#src/scraping/fixture-normaliser.js';
+import { reloadEnv } from '#src/config/env.js';
+import { createTestConfig, setTestEnvironment } from '../../helpers/test-config.js';
 import { createTestDatabase, TestDatabase } from '../../helpers/test-database.js';
 
 /**
- * Scraper stub returning a fixed, fully-controlled fixture list so the test can
- * simulate the club website dropping every old fixture and showing new ones.
+ * Scraper stub returning a fixed, fully-controlled RAW fixture list (parser shape) so the test can
+ * simulate the club website dropping every old fixture and showing new ones. The service normalises
+ * these to our-team fixtures, so each row features our team ("Test Team") with Old/New opponents.
  */
 class StubScraper implements IFixtureScraper {
   constructor(public fixtures: Fixture[]) {}
@@ -20,33 +24,20 @@ class StubScraper implements IFixtureScraper {
   }
 }
 
-const SEASON_ONE: Fixture[] = [
-  {
-    date: '2026-01-10',
-    time: '19:00',
-    opponent: 'Old Town FC',
-    venue: 'Arena A',
-    status: 'upcoming',
-  },
-  { date: '2026-01-17', time: '19:00', opponent: 'Old City', venue: 'Arena A', status: 'upcoming' },
-];
+const TEAM = 'Test Team';
+const FIXED = new Date(2026, 0, 1); // deterministic year anchor for the normaliser
 
-const SEASON_TWO: Fixture[] = [
-  {
-    date: '2026-09-05',
-    time: '19:00',
-    opponent: 'New United',
-    venue: 'Arena B',
-    status: 'upcoming',
-  },
-  {
-    date: '2026-09-12',
-    time: '19:00',
-    opponent: 'New Rovers',
-    venue: 'Arena B',
-    status: 'upcoming',
-  },
-];
+function rawHome(month: number, day: number, opponent: string): Fixture {
+  return { month, day, time: '19:00', venue: 'Arena A', status: 'upcoming', homeTeam: TEAM, awayTeam: opponent };
+}
+
+// RAW parser-shape fixtures fed through the StubScraper + sync path (normalised by the service).
+const SEASON_ONE: Fixture[] = [rawHome(1, 10, 'Old Town FC'), rawHome(1, 17, 'Old City')];
+const SEASON_TWO: Fixture[] = [rawHome(9, 5, 'New United'), rawHome(9, 12, 'New Rovers')];
+
+// Normalised (our-team) forms for the direct shouldCreateNewSeason calls (which now take OurFixture[]).
+const OUR_ONE = normaliseOurFixtures(SEASON_ONE, TEAM, FIXED).fixtures;
+const OUR_TWO = normaliseOurFixtures(SEASON_TWO, TEAM, FIXED).fixtures;
 
 describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
   let test: TestDatabase;
@@ -54,11 +45,14 @@ describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
   let teamId: number;
 
   beforeEach(async () => {
+    setTestEnvironment(createTestConfig({ teamName: TEAM }));
+    reloadEnv();
+
     test = createTestDatabase();
 
     const [team] = await test.db
       .insert(schema.teams)
-      .values({ name: 'Test Team', clubUrl: 'https://example.com/club/', whatsappGroupId: null })
+      .values({ name: TEAM, clubUrl: 'https://example.com/club/', whatsappGroupId: null })
       .returning();
     teamId = team!.id;
 
@@ -70,7 +64,7 @@ describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
   });
 
   function fixtureService(fixtures: Fixture[]): FixtureService {
-    return new FixtureService(test.db, seasonService, new StubScraper(fixtures));
+    return new FixtureService(test.db, seasonService, new StubScraper(fixtures), () => FIXED);
   }
 
   /** Seed season 1 with fixtures plus a poll and a stat record for retention checks. */
@@ -112,14 +106,14 @@ describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
 
   describe('shouldCreateNewSeason', () => {
     it('returns false on the very first scrape (no previously scraped fixtures)', async () => {
-      const should = await seasonService.shouldCreateNewSeason(teamId, SEASON_ONE);
+      const should = await seasonService.shouldCreateNewSeason(teamId, OUR_ONE);
       expect(should).toBe(false);
     });
 
     it('returns false when some previously scraped fixtures still appear', async () => {
       await seedSeasonOne();
       // Re-scrape that still contains one of the original fixtures
-      const overlapping = [SEASON_ONE[0]!, SEASON_TWO[0]!];
+      const overlapping = [OUR_ONE[0]!, OUR_TWO[0]!];
       const should = await seasonService.shouldCreateNewSeason(teamId, overlapping);
       expect(should).toBe(false);
     });
@@ -132,7 +126,7 @@ describe('Season Transition (US5, FR-004/FR-005, SC-006/SC-007)', () => {
 
     it('returns true when every previously scraped fixture has disappeared (FR-005)', async () => {
       await seedSeasonOne();
-      const should = await seasonService.shouldCreateNewSeason(teamId, SEASON_TWO);
+      const should = await seasonService.shouldCreateNewSeason(teamId, OUR_TWO);
       expect(should).toBe(true);
     });
   });

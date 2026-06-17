@@ -49,13 +49,20 @@ is **not** reduced to a single row.
 
 ### `Fixture` (scraper output — `src/scraping/fixture-scraper.ts`)
 
-Existing fields retained: `date`, `time`, `opponent`, `venue`, `status`, `homeTeam?`, `awayTeam?`,
-`homeScore?`, `awayScore?`.
+The parser is a **faithful HTML→rows parser** and nothing more (contract C1). It reports only raw,
+directly-observable facts; it does **not** compute the calendar year and does **not** derive the
+opponent. Those interpretations belong to the normaliser (C2).
 
-**Change**: the parser must surface enough to let the normaliser assign the correct year — i.e. the
-week's **month + day** rather than a year already guessed from the current month. The faithful
-home/away team names and `-`/numeric scores it already extracts are kept; what is dropped is the
-per-fixture year inference inside `extractDate`.
+Fields: `month` (1–12), `day` (1–31), `time` (`HH:MM`), `homeTeam`, `awayTeam`, `homeScore?`,
+`awayScore?`, `venue`, `status` (`completed` iff both scores numeric, else `upcoming`).
+
+**Change from the previous shape**: `date` and `opponent` are **removed** from the parser output.
+Instead of a year already guessed from the current month, the parser surfaces the week's raw
+**month + day**; instead of a hard-coded `opponent = homeTeam`, it surfaces the faithful
+`homeTeam`/`awayTeam` and lets the normaliser pick the opposing side. The per-fixture year inference
+inside `extractDate` is dropped entirely (no clock dependence below the `IFixtureScraper`
+boundary). The absolute `date` and the derived `opponent` reappear only on `OurFixture` below, which
+the normaliser produces and the service persists.
 
 ### `OurFixture` (normaliser output — `src/scraping/fixture-normaliser.ts`, NEW)
 

@@ -5,26 +5,54 @@ import { AuthError } from '../utils/errors.js';
 import { enqueueRequest } from './request-queue.js';
 import type { IManvfatSession } from './manvfat-session.js';
 
+/**
+ * A single league fixture as faithfully read from the club page (spec 006, contract C1).
+ *
+ * The parser reports only directly-observable facts. It does NOT compute the calendar year and
+ * does NOT derive the opponent — those interpretations belong to the normaliser
+ * (`fixture-normaliser.ts`, C2), which has the team name and an anchor "today". Accordingly there
+ * is no `date` and no `opponent` here: just the week's raw `month`/`day`, the faithful
+ * `homeTeam`/`awayTeam`, and the `-`/numeric scores.
+ */
 export interface Fixture {
-  date: string; // ISO format YYYY-MM-DD
+  month: number; // 1-12, from the week header
+  day: number; // 1-31, from the week header
   time: string; // HH:MM format
-  opponent: string;
   venue: string;
   status: 'upcoming' | 'completed' | 'cancelled';
-  homeTeam?: string;
-  awayTeam?: string;
+  homeTeam: string;
+  awayTeam: string;
   homeScore?: number;
   awayScore?: number;
 }
 
+/** Month name (lower-cased) -> 1-12. */
+const MONTHS: Record<string, number> = {
+  january: 1,
+  february: 2,
+  march: 3,
+  april: 4,
+  may: 5,
+  june: 6,
+  july: 7,
+  august: 8,
+  september: 9,
+  october: 10,
+  november: 11,
+  december: 12,
+};
+
 /**
- * Extract date from week header text
+ * Parse a week header into its raw month + day — no year (contract C1, research §2).
+ *
+ * The week headers ("Week 7 - June 29th") carry no year, and the parser MUST NOT guess one from
+ * the current month (that was the FR-002 bug). It is a pure function of the header text only; the
+ * normaliser assigns the calendar year from page order anchored to today.
+ *
  * @param weekText - Text like "Week 7 - June 29th"
- * @param year - Optional year (defaults to current year with inference)
- * @returns ISO date string "YYYY-MM-DD"
+ * @returns `{ month, day }` with month in 1-12
  */
-export function extractDate(weekText: string, year?: number): string {
-  // Parse "Week N - Month DDth/st/nd/rd" format
+export function parseWeekDate(weekText: string): { month: number; day: number } {
   const dateMatch = weekText.match(/Week\s+\d+\s+-\s+(\w+)\s+(\d+)(?:st|nd|rd|th)/i);
 
   if (!dateMatch) {
@@ -32,63 +60,29 @@ export function extractDate(weekText: string, year?: number): string {
   }
 
   const monthName = dateMatch[1];
-  const day = dateMatch[2];
+  const dayText = dateMatch[2];
 
-  if (!monthName || !day) {
+  if (!monthName || !dayText) {
     throw new Error(`Invalid date format: ${weekText}`);
   }
 
-  // Month name to number mapping
-  const months: Record<string, number> = {
-    january: 0,
-    february: 1,
-    march: 2,
-    april: 3,
-    may: 4,
-    june: 5,
-    july: 6,
-    august: 7,
-    september: 8,
-    october: 9,
-    november: 10,
-    december: 11,
-  };
-
-  const month = months[monthName.toLowerCase()];
+  const month = MONTHS[monthName.toLowerCase()];
   if (month === undefined) {
     throw new Error(`Unknown month: ${monthName}`);
   }
 
-  // If no year provided, infer from current date
-  if (!year) {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
-    // If we're in December and the fixture is in January-March, use next year
-    // If we're in Jan-Mar and the fixture is in Oct-Dec, use previous year
-    if (currentMonth >= 10 && month <= 2) {
-      year = currentYear + 1;
-    } else if (currentMonth <= 2 && month >= 10) {
-      year = currentYear - 1;
-    } else {
-      year = currentYear;
-    }
-  }
-
-  // Create date and format as ISO string
-  const date = new Date(year, month, parseInt(day));
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-
-  return `${yyyy}-${mm}-${dd}`;
+  return { month, day: parseInt(dayText, 10) };
 }
 
 /**
- * Scrape fixtures from MAN v FAT club page HTML
+ * Scrape fixtures from MAN v FAT club page HTML (faithful HTML -> rows parser, contract C1).
+ *
+ * Returns one row per league fixture with the week's `month`/`day`, the faithful
+ * `homeTeam`/`awayTeam`, `-`/numeric scores, `time`, and `status` (`completed` iff both scores are
+ * numeric, else `upcoming`). It does NOT filter by team, derive the opponent, or assign a year —
+ * those are the normaliser's job (`normaliseOurFixtures`).
+ *
  * @param html - HTML content from club page
- * @returns Array of fixtures with date, time, opponent, venue
  */
 export function scrapeFixtures(html: string): Fixture[] {
   const $ = cheerio.load(html);
@@ -104,7 +98,7 @@ export function scrapeFixtures(html: string): Fixture[] {
     }
 
     try {
-      const date = extractDate(weekText);
+      const { month, day } = parseWeekDate(weekText);
 
       // Find the fixture table following this header
       const section = $(headerElement).parent().parent();
@@ -163,23 +157,21 @@ export function scrapeFixtures(html: string): Fixture[] {
         const homeScore = homeScoreText !== '-' ? parseInt(homeScoreText) : undefined;
         const awayScore = awayScoreText !== '-' ? parseInt(awayScoreText) : undefined;
 
-        // Determine game status
+        // Determine game status — completed iff BOTH scores are numeric (a "-" on either side
+        // means the result is not yet published, so the game is still "upcoming"/unplayed.
         let status: Fixture['status'] = 'upcoming';
         if (homeScore !== undefined && awayScore !== undefined) {
           status = 'completed';
         }
 
-        // Determine opponent (we assume we're the away team for simplicity)
-        // In a real implementation, this would be configurable or detected
-        const opponent = homeTeam;
-
-        // Venue defaults to club venue (not specified in HTML)
+        // Venue defaults to club venue (not specified in HTML). Opponent + year are NOT decided
+        // here — the normaliser derives the opponent from home/away and assigns the calendar year.
         const venue = 'Club Venue';
 
         fixtures.push({
-          date,
+          month,
+          day,
           time,
-          opponent,
           venue,
           status,
           homeTeam,

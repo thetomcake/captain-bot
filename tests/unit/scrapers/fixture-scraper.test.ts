@@ -2,151 +2,115 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-// Import the fixture scraper (to be implemented)
 import {
   scrapeFixtures,
-  extractDate,
+  parseWeekDate,
   isAuthenticated,
   DefaultFixtureScraper,
-  type Fixture,
   type FetchPageFn,
 } from '#src/scraping/fixture-scraper.js';
 import type { IManvfatSession } from '#src/scraping/manvfat-session.js';
 import { AuthError } from '#src/utils/errors.js';
 
-describe('Fixture Scraper - Static HTML Parsing', () => {
+const fixture = (name: string): string =>
+  readFileSync(resolve(__dirname, `../../fixtures/html/${name}`), 'utf-8');
+
+// Contract C1 (spec 006): the parser is a faithful HTML -> rows parser. It surfaces the week's raw
+// month/day + faithful home/away teams + `-`/numeric scores. It MUST NOT filter by team, derive an
+// opponent, or guess the calendar year — those are the normaliser's job.
+describe('scrapeFixtures (C1 — faithful parser)', () => {
   let html: string;
 
   beforeAll(() => {
-    // Load the live HTML fixture captured from manvfatfootball.com/club/watford/
-    const fixturePath = resolve(__dirname, '../../fixtures/html/manvfat-fixtures.html');
-    html = readFileSync(fixturePath, 'utf-8');
+    html = fixture('us1-home-away.html');
   });
 
-  describe('scrapeFixtures', () => {
-    it('should extract fixtures from live HTML', () => {
-      const fixtures = scrapeFixtures(html);
-
-      // Should extract multiple fixtures
-      expect(fixtures.length).toBeGreaterThan(0);
-    });
-
-    it('should extract required FR-002 fields (date, time, opponent, venue)', () => {
-      const fixtures = scrapeFixtures(html);
-
-      const fixture = fixtures[0];
-
-      // FR-002 required fields
-      expect(fixture).toHaveProperty('date');
-      expect(fixture).toHaveProperty('time');
-      expect(fixture).toHaveProperty('opponent');
-      expect(fixture).toHaveProperty('venue');
-
-      // Date should be a valid date string
-      expect(fixture.date).toMatch(/\d{4}-\d{2}-\d{2}/);
-
-      // Time should be HH:MM format
-      expect(fixture.time).toMatch(/\d{2}:\d{2}/);
-
-      // Opponent should be non-empty
-      expect(fixture.opponent.length).toBeGreaterThan(0);
-
-      // Venue should be present (even if default)
-      expect(fixture.venue.length).toBeGreaterThan(0);
-    });
-
-    it('should handle "Fixtures to be confirmed" sections', () => {
-      const fixtures = scrapeFixtures(html);
-
-      // Should not create fixtures for "to be confirmed" weeks
-      const confirmedFixtures = fixtures.filter(
-        (f) => f.opponent !== 'TBD' && f.opponent !== 'To be confirmed'
-      );
-
-      expect(confirmedFixtures.length).toBeGreaterThan(0);
-    });
-
-    it('should extract multiple fixtures from different weeks', () => {
-      const fixtures = scrapeFixtures(html);
-
-      // Should have fixtures from multiple weeks
-      const uniqueDates = new Set(fixtures.map((f) => f.date));
-      expect(uniqueDates.size).toBeGreaterThan(1);
-    });
-
-    it('should include game status for each fixture', () => {
-      const fixtures = scrapeFixtures(html);
-
-      fixtures.forEach((fixture) => {
-        expect(fixture).toHaveProperty('status');
-        expect(['upcoming', 'completed', 'cancelled']).toContain(fixture.status);
-      });
-    });
-
-    it('should detect completed games with scores', () => {
-      const fixtures = scrapeFixtures(html);
-
-      // Look for games with actual scores (not "-")
-      const completedGames = fixtures.filter((f) => f.status === 'completed');
-
-      // There should be some completed games in the HTML
-      // (if the HTML includes past games)
-      expect(completedGames).toBeDefined();
-    });
-
-    it('should handle special characters in team names', () => {
-      const fixtures = scrapeFixtures(html);
-
-      fixtures.forEach((fixture) => {
-        // Team names should be trimmed and non-empty
-        expect(fixture.opponent.trim()).toBe(fixture.opponent);
-        expect(fixture.opponent.length).toBeGreaterThan(0);
-      });
-    });
+  it('returns one row per league fixture (no team filtering in the parser)', () => {
+    const fixtures = scrapeFixtures(html);
+    expect(fixtures).toHaveLength(3);
   });
 
-  describe('extractDate', () => {
-    it('should parse "Week N - Month DDth" format', () => {
-      const date = extractDate('Week 7 - June 29th', 2026);
+  it('reports faithful home/away team names whether or not our team is involved', () => {
+    const fixtures = scrapeFixtures(html);
 
-      expect(date).toBe('2026-06-29');
-    });
+    expect(fixtures[0]).toMatchObject({ homeTeam: 'Blue team', awayTeam: 'Red team' });
+    expect(fixtures[1]).toMatchObject({ homeTeam: 'White Team', awayTeam: 'Green Team' });
+    expect(fixtures[2]).toMatchObject({ homeTeam: 'Yellow Team', awayTeam: 'White Team' });
+  });
 
-    it('should parse "Week N - Month DDst" format', () => {
-      const date = extractDate('Week 1 - June 1st', 2026);
+  it('surfaces the week month + day and does NOT produce a year-bearing date or an opponent', () => {
+    const fixtures = scrapeFixtures(html);
 
-      expect(date).toBe('2026-06-01');
-    });
+    expect(fixtures[0]).toMatchObject({ month: 11, day: 2, time: '19:00' });
+    expect(fixtures[1]).toMatchObject({ month: 11, day: 9, time: '19:30' });
+    expect(fixtures[2]).toMatchObject({ month: 11, day: 16, time: '20:00' });
 
-    it('should parse "Week N - Month DDnd" format', () => {
-      const date = extractDate('Week 2 - June 2nd', 2026);
+    // Year/opponent are the normaliser's responsibility — not surfaced here.
+    expect(fixtures[0]).not.toHaveProperty('date');
+    expect(fixtures[0]).not.toHaveProperty('opponent');
+  });
 
-      expect(date).toBe('2026-06-02');
-    });
+  it('sets status = completed iff BOTH scores are numeric, else upcoming', () => {
+    const both = scrapeFixtures(scoreRow('3', '1'));
+    expect(both[0]).toMatchObject({ status: 'completed', homeScore: 3, awayScore: 1 });
 
-    it('should parse "Week N - Month DDrd" format', () => {
-      const date = extractDate('Week 3 - June 3rd', 2026);
+    const onePending = scrapeFixtures(scoreRow('3', '-'));
+    expect(onePending[0]).toMatchObject({ status: 'upcoming' });
+    expect(onePending[0]?.awayScore).toBeUndefined();
 
-      expect(date).toBe('2026-06-03');
-    });
+    const unplayed = scrapeFixtures(scoreRow('-', '-'));
+    expect(unplayed[0]).toMatchObject({ status: 'upcoming' });
+  });
 
-    it('should handle different months', () => {
-      const janDate = extractDate('Week 1 - January 15th', 2026);
-      const decDate = extractDate('Week 20 - December 25th', 2026);
-
-      expect(janDate).toBe('2026-01-15');
-      expect(decDate).toBe('2026-12-25');
-    });
-
-    it('should infer year for dates in current season', () => {
-      // Test year inference logic
-      // If we're in December and the date is January, it should use next year
-      const date = extractDate('Week 1 - January 10th');
-
-      expect(date).toMatch(/\d{4}-01-10/);
-    });
+  it('skips "Fixtures to be confirmed" placeholder rows', () => {
+    const html = weekBlock(`
+      <tr class="no-highlight"><td class="subtitle">Fixtures to be confirmed</td></tr>
+      ${gameRow('19:00', 'White Team', 'Green Team', '-', '-')}
+    `);
+    const fixtures = scrapeFixtures(html);
+    expect(fixtures).toHaveLength(1);
+    expect(fixtures[0]).toMatchObject({ homeTeam: 'White Team', awayTeam: 'Green Team' });
   });
 });
+
+describe('parseWeekDate (C1 — month/day only, no year guessing)', () => {
+  it('parses "Week N - Month DDth/st/nd/rd" into month (1-12) + day', () => {
+    expect(parseWeekDate('Week 7 - June 29th')).toEqual({ month: 6, day: 29 });
+    expect(parseWeekDate('Week 1 - June 1st')).toEqual({ month: 6, day: 1 });
+    expect(parseWeekDate('Week 2 - June 2nd')).toEqual({ month: 6, day: 2 });
+    expect(parseWeekDate('Week 3 - June 3rd')).toEqual({ month: 6, day: 3 });
+  });
+
+  it('never infers a year — January and December parse identically regardless of "now"', () => {
+    expect(parseWeekDate('Week 1 - January 10th')).toEqual({ month: 1, day: 10 });
+    expect(parseWeekDate('Week 20 - December 25th')).toEqual({ month: 12, day: 25 });
+  });
+
+  it('throws on an unparseable header', () => {
+    expect(() => parseWeekDate('not a week header')).toThrow();
+  });
+});
+
+// --- small inline-HTML builders for the status/TBD cases (single week, single table) ---
+function weekBlock(rows: string): string {
+  return `<html><body class="logged-in"><div class="col"><div class="mod">
+    <div class="group-header white">Week 1 - November 2nd</div>
+    <div class="responsive-table"><table class="fixture-table">${rows}</table></div>
+  </div></div></body></html>`;
+}
+function gameRow(time: string, home: string, away: string, hs: string, as: string): string {
+  return `<tr class="no-highlight">
+    <td class="game-week-no" rowspan="1">${time}<br>League</td>
+    <td class="team-name">${home}</td>
+    <td class="score home neutral">${hs}</td>
+    <td class="versus">v</td>
+    <td class="score away neutral">${as}</td>
+    <td class="team-name">${away}</td>
+  </tr>`;
+}
+function scoreRow(hs: string, as: string): string {
+  return weekBlock(gameRow('19:00', 'White Team', 'Red team', hs, as));
+}
 
 // ---------------------------------------------------------------------------
 // Feature 005, User Story 2 — transparent session recovery.
