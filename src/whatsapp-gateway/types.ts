@@ -77,6 +77,17 @@ export type DeleteOutcome =
   | { ok: true }
   | { ok: false; reason: 'window-expired' | 'not-found' | 'network' | 'unknown'; detail?: string };
 
+/**
+ * Result of a best-effort pin or unpin (007-auto-pin-poll, FR-001/FR-006). Never thrown — always
+ * returned (mirrors {@link DeleteOutcome}). `{ ok: true }` means the (un)pin stanza was **sent**
+ * (fire-and-forget — WhatsApp does not ack it), not proof of a server-side state change.
+ * `reason: 'network'` is a transport drop mid-send; `reason: 'unknown'` an encryption / precondition
+ * fault. The discrete pin-duration buckets stay below the Gateway seam (see messages/pin-duration.ts).
+ */
+export type PinOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'network' | 'unknown'; detail?: string };
+
 // ── Polls ───────────────────────────────────────────────────────────────────--
 
 /** Input to `sendPoll`. Single-choice; multi-select is out of scope for now. */

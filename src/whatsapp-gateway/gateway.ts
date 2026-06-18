@@ -14,6 +14,7 @@ import makeWASocket, {
   isLidUser,
   isPnUser,
   jidNormalizedUser,
+  proto,
 } from '@whiskeysockets/baileys';
 import type {
   ConnectionState,
@@ -21,7 +22,6 @@ import type {
   WAMessage,
   WAMessageKey,
   WASocket,
-  proto,
 } from '@whiskeysockets/baileys';
 import type {
   ConnectionStatus,
@@ -31,6 +31,7 @@ import type {
   IncomingMessage,
   Logger,
   MessageRef,
+  PinOutcome,
   PollKeyset,
   PollSendResult,
   PollSpec,
@@ -44,6 +45,7 @@ import { requireConnected } from './connection/require-connected.js';
 import { createAuthStore, type AuthStore } from './auth/auth-state.js';
 import { MessageStore, messageStoreKey } from './messages/message-store.js';
 import { classifyDeleteError } from './messages/delete-classifier.js';
+import { selectPinDuration } from './messages/pin-duration.js';
 import { GroupFilter } from './groups/group-filter.js';
 import { IdentityResolver } from './identity/identity-resolver.js';
 import { RateLimiter } from './rate-limiter.js';
@@ -305,6 +307,83 @@ export class WhatsAppGateway {
       });
       return { ok: false, reason, detail };
     }
+  }
+
+  // ── Pinning (007-auto-pin-poll) ───────────────────────────────────────────────────--
+  /**
+   * Best-effort pin of a message/poll the Gateway previously sent (007, FR-001/FR-002). Pinning is
+   * a send — `sock.sendMessage(jid, { pin: key, type: PIN_FOR_ALL, time })` — so it reuses the same
+   * machinery as `deleteMessage`: the `connectedSocket()` guard, the cached-key-or-reconstruct
+   * strategy, and the `sendLimiter` (so the ban-risk profile is unchanged, FR-016/C8).
+   *
+   * WhatsApp pin durations are DISCRETE (24h/7d/30d); the caller passes a real "seconds until event"
+   * and the gateway picks the smallest bucket that covers it via the pure {@link selectPinDuration}
+   * — the discrete set never leaves this seam (FR-007). NEVER throws on a send failure: the error is
+   * classified into a {@link PinOutcome} reason and returned (FR-006), mirroring `deleteMessage`.
+   */
+  async pinMessage(ref: MessageRef, durationSeconds: number): Promise<PinOutcome> {
+    const sock = this.connectedSocket();
+    const key = this.resolveSentKey(ref);
+    const time = selectPinDuration(durationSeconds);
+    try {
+      await this.sendLimiter.execute(() =>
+        sock.sendMessage(ref.groupId, { pin: key, type: proto.PinInChat.Type.PIN_FOR_ALL, time })
+      );
+      this.config.logger.info('WhatsAppGateway: message pinned', {
+        id: ref.id,
+        groupId: ref.groupId,
+        time,
+      });
+      return { ok: true };
+    } catch (err) {
+      return this.classifyPinFailure('pinMessage', ref, err);
+    }
+  }
+
+  /**
+   * Best-effort unpin of a message/poll the Gateway previously sent (007, FR-005). Same guard +
+   * key strategy + rate limiter as {@link pinMessage}; sends `{ pin: key, type: UNPIN_FOR_ALL }`
+   * (no `time`). NEVER throws on a send failure.
+   */
+  async unpinMessage(ref: MessageRef): Promise<PinOutcome> {
+    const sock = this.connectedSocket();
+    const key = this.resolveSentKey(ref);
+    try {
+      await this.sendLimiter.execute(() =>
+        sock.sendMessage(ref.groupId, { pin: key, type: proto.PinInChat.Type.UNPIN_FOR_ALL })
+      );
+      this.config.logger.info('WhatsAppGateway: message unpinned', {
+        id: ref.id,
+        groupId: ref.groupId,
+      });
+      return { ok: true };
+    } catch (err) {
+      return this.classifyPinFailure('unpinMessage', ref, err);
+    }
+  }
+
+  /**
+   * Resolve the message key to (un)pin: prefer the genuine cached key (the documented `{ pin:
+   * msg.key }` form), else reconstruct a Gateway-sent key — identical to `deleteMessage` (C7/C11).
+   */
+  private resolveSentKey(ref: MessageRef): WAMessageKey {
+    const stored = this.messageStore.get(messageStoreKey(ref.groupId, ref.id));
+    return stored?.key ?? { remoteJid: ref.groupId, fromMe: true, id: ref.id };
+  }
+
+  /** Classify a thrown (un)pin send error into a non-fatal {@link PinOutcome} + warn-log (no secrets). */
+  private classifyPinFailure(op: string, ref: MessageRef, err: unknown): PinOutcome {
+    // The (un)pin failure reasons are exactly the send-side ones `classifyDeleteError` produces;
+    // PinOutcome admits only the transport split (network) vs everything-else (unknown).
+    const { reason: deleteReason, detail } = classifyDeleteError(err);
+    const reason: 'network' | 'unknown' = deleteReason === 'network' ? 'network' : 'unknown';
+    this.config.logger.warn(`WhatsAppGateway: ${op} failed (best-effort, non-fatal)`, {
+      id: ref.id,
+      groupId: ref.groupId,
+      reason,
+      detail,
+    });
+    return { ok: false, reason, detail };
   }
 
   // ── Polls (US3) ─────────────────────────────────────────────────────────────────---

@@ -67,7 +67,10 @@ export class PollService {
     private readonly fixtureService?: FixtureService,
     private readonly gateway?: IWhatsAppGateway,
     private readonly groupId?: string,
-    private readonly keysetStore: KeysetStore = new KeysetStore(db)
+    private readonly keysetStore: KeysetStore = new KeysetStore(db),
+    // Injectable clock (FR-008, mirrors FixtureService) so the computed pin window is deterministic
+    // in tests. Backward-compatible default ⇒ no change at the `new PollService(...)` call sites.
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   private get fixtures(): FixtureService {
@@ -116,6 +119,10 @@ export class PollService {
     });
     // Stamp the post time so the `!postpoll` throttle (T051) can ignore rapid re-triggers.
     await this.recordPollPosted(next.teamId);
+
+    // Pin the new poll until game time (FR-002/FR-004). Last best-effort side-effect of a
+    // successful post — never alters the PostPollOutcome or DB state (FR-006).
+    await this.pinNewPoll(ref, game);
 
     const outcome = existing ? 'replaced' : 'posted';
     logger.info(`Poll ${outcome} for game ${game.id} (${game.opponent})`, {
@@ -322,15 +329,68 @@ export class PollService {
     await this.db.delete(schema.pollResponses).where(eq(schema.pollResponses.pollId, poll.id));
     await this.db.delete(schema.polls).where(eq(schema.polls.id, poll.id));
 
-    const outcome = await this.wa.deleteMessage({
-      id: poll.pollMessageId,
-      groupId: poll.groupId,
-    });
+    const oldRef: MessageRef = { id: poll.pollMessageId, groupId: poll.groupId };
+    // Unpin BEFORE deleting (FR-005) so a failed delete never leaves the old poll pinned.
+    await this.unpinOldPoll(oldRef, poll.gameId);
+
+    const outcome = await this.wa.deleteMessage(oldRef);
     if (!outcome.ok) {
       logger.warn('Failed to delete old WhatsApp poll message during replacement', {
         gameId: poll.gameId,
         pollMessageId: poll.pollMessageId,
         reason: outcome.reason,
+      });
+    }
+  }
+
+  /**
+   * Pin the freshly posted poll for the window until kick-off (FR-002/FR-004). Strictly best-effort
+   * (FR-006): neither a `{ ok: false }` outcome nor an unexpected throw may abort posting — both are
+   * logged at warn (no secrets) and swallowed. Game time is always in the future (next-fixture
+   * selection guarantee), so the window is positive and a real pin is always attempted.
+   */
+  private async pinNewPoll(ref: MessageRef, game: Game): Promise<void> {
+    const secondsUntilGame = Math.floor((game.gameDate.getTime() - this.now().getTime()) / 1000);
+    try {
+      const outcome = await this.wa.pinMessage(ref, secondsUntilGame);
+      if (!outcome.ok) {
+        logger.warn('Failed to pin new WhatsApp poll message (best-effort)', {
+          gameId: game.id,
+          opponent: game.opponent,
+          groupId: this.group,
+          reason: outcome.reason,
+        });
+      }
+    } catch (error) {
+      logger.warn('Unexpected error pinning new WhatsApp poll message (best-effort)', {
+        gameId: game.id,
+        opponent: game.opponent,
+        groupId: this.group,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Unpin the superseded poll on replacement (FR-005), best-effort like {@link pinNewPoll}: a
+   * `{ ok: false }` outcome or an unexpected throw is logged at warn and swallowed so replacement
+   * always proceeds to the delete + new-poll pin (FR-006).
+   */
+  private async unpinOldPoll(ref: MessageRef, gameId: number): Promise<void> {
+    try {
+      const outcome = await this.wa.unpinMessage(ref);
+      if (!outcome.ok) {
+        logger.warn('Failed to unpin old WhatsApp poll message during replacement (best-effort)', {
+          gameId,
+          pollMessageId: ref.id,
+          reason: outcome.reason,
+        });
+      }
+    } catch (error) {
+      logger.warn('Unexpected error unpinning old WhatsApp poll message (best-effort)', {
+        gameId,
+        pollMessageId: ref.id,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }

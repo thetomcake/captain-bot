@@ -15,6 +15,7 @@ import type {
   IncomingMessage,
   MessageRef,
   DeleteOutcome,
+  PinOutcome,
   PollSpec,
   PollSendResult,
   PollVote,
@@ -26,6 +27,7 @@ export type {
   IncomingMessage,
   MessageRef,
   DeleteOutcome,
+  PinOutcome,
   PollSpec,
   PollSendResult,
   PollVote,
@@ -46,6 +48,11 @@ export interface IWhatsAppGateway {
   sendMessage(groupId: string, text: string): Promise<MessageRef>;
   sendPoll(groupId: string, poll: PollSpec): Promise<PollSendResult>; // { ref, keyset }
   deleteMessage(ref: MessageRef): Promise<DeleteOutcome>; // never throws
+
+  /** Pin an already-sent message for ~`durationSeconds` (gateway maps to the nearest WhatsApp bucket). */
+  pinMessage(ref: MessageRef, durationSeconds: number): Promise<PinOutcome>; // never throws
+  /** Unpin an already-sent message. */
+  unpinMessage(ref: MessageRef): Promise<PinOutcome>; // never throws
 
   onQR(handler: (qr: string) => void): void;
   onConnectionChange(handler: (s: ConnectionStatus) => void): void;

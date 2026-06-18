@@ -39,7 +39,7 @@ Single project: `src/`, `tests/` at repo root (per plan.md Structure Decision). 
 
 **Purpose**: Confirm preconditions; no installation needed.
 
-- [ ] T001 Confirm no dependency/schema change is required: `@whiskeysockets/baileys@7.0.0-rc13` already
+- [X] T001 Confirm no dependency/schema change is required: `@whiskeysockets/baileys@7.0.0-rc13` already
   exposes the `sendMessage` `{ pin, type, time }` option (verified in research.md §1) and this feature
   adds no migration. Locate the touch points: `src/whatsapp-gateway/{types.ts,gateway.ts,index.ts}`,
   `src/whatsapp/gateway-port.ts`, `src/services/poll-service.ts`, `tests/helpers/fake-gateway.ts`.
@@ -53,32 +53,32 @@ depend on this phase (US1 needs `pinMessage`, US2 needs `unpinMessage`, US3 need
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Implement the pure helper `selectPinDuration(requestedSeconds): 86400 | 604800 | 2592000`
+- [X] T002 Implement the pure helper `selectPinDuration(requestedSeconds): 86400 | 604800 | 2592000`
   (+ exported `PinDurationSeconds` type) in `src/whatsapp-gateway/messages/pin-duration.ts`: return the
   smallest bucket `≥ requestedSeconds`, `2592000` when `> 30d`, defensive `≤ 0` → `86400`. No Baileys
   import — pure arithmetic over the discrete set. (contracts/gateway-pin.md helper table.)
-- [ ] T003 [P] Add the `PinOutcome` type (`{ ok: true } | { ok: false; reason: 'network' | 'unknown';
+- [X] T003 [P] Add the `PinOutcome` type (`{ ok: true } | { ok: false; reason: 'network' | 'unknown';
   detail?: string }`) to `src/whatsapp-gateway/types.ts` and re-export it from
   `src/whatsapp-gateway/index.ts`. (data-model.md — mirrors `DeleteOutcome`.)
-- [ ] T004 Extend the `IWhatsAppGateway` port in `src/whatsapp/gateway-port.ts`: add
+- [X] T004 Extend the `IWhatsAppGateway` port in `src/whatsapp/gateway-port.ts`: add
   `pinMessage(ref: MessageRef, durationSeconds: number): Promise<PinOutcome>` and
   `unpinMessage(ref: MessageRef): Promise<PinOutcome>`, and re-export `PinOutcome` (depends on T003).
-- [ ] T005 Implement `WhatsAppGateway.pinMessage` in `src/whatsapp-gateway/gateway.ts`: guard via
+- [X] T005 Implement `WhatsAppGateway.pinMessage` in `src/whatsapp-gateway/gateway.ts`: guard via
   `connectedSocket()`; resolve the message key (cached `MessageStore` key, else reconstruct
   `{ remoteJid: ref.groupId, fromMe: true, id: ref.id }` — same as `deleteMessage`); compute the
   bucket via `selectPinDuration(durationSeconds)`; send through `sendLimiter` →
   `sock.sendMessage(ref.groupId, { pin: key, type: proto.PinInChat.Type.PIN_FOR_ALL, time: bucket })`;
   return `{ ok: true }`, or classify a thrown send error into `{ ok: false, reason }` and log at warn
   (never throw on a send failure). (contracts/gateway-pin.md C1–C8; depends on T002, T003.)
-- [ ] T006 Implement `WhatsAppGateway.unpinMessage` in `src/whatsapp-gateway/gateway.ts`: same guard +
+- [X] T006 Implement `WhatsAppGateway.unpinMessage` in `src/whatsapp-gateway/gateway.ts`: same guard +
   key strategy + `sendLimiter`; send `{ pin: key, type: proto.PinInChat.Type.UNPIN_FOR_ALL }` (no
   `time`); return `PinOutcome`, never throwing on a send failure. (contracts/gateway-pin.md C9–C11;
   depends on T003; same file as T005 — sequential.)
-- [ ] T007 [P] Implement `pinMessage`/`unpinMessage` in the test double
+- [X] T007 [P] Implement `pinMessage`/`unpinMessage` in the test double
   `tests/helpers/fake-gateway.ts`: record `pinnedMessages: { ref, durationSeconds }[]` and
   `unpinnedMessages: MessageRef[]`; add failure toggles `pinOutcomeOverride` / `unpinOutcomeOverride`
   (default `{ ok: true }`); include both in `reset()`. No Baileys import. (Depends on T004.)
-- [ ] T008 [P] Add the injectable clock seam to `PollService` in `src/services/poll-service.ts`:
+- [X] T008 [P] Add the injectable clock seam to `PollService` in `src/services/poll-service.ts`:
   constructor gains `private readonly now: () => Date = () => new Date()` as the last parameter (after
   `keysetStore`), mirroring `FixtureService`. Backward-compatible default ⇒ no change at the
   `new PollService(...)` call sites in `daemon.ts` / `poll.ts` / `fixtures.ts`. (FR-008.)
@@ -98,14 +98,14 @@ depend on this phase (US1 needs `pinMessage`, US2 needs `unpinMessage`, US3 need
 
 ### Tests for User Story 1 ⚠️ (write first, ensure they FAIL)
 
-- [ ] T009 [US1] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with a
+- [X] T009 [US1] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with a
   fixed injected `now` and a fixture `N` days out, `postOrReplaceNextPoll()` pins the **new** poll's
   ref with `durationSeconds = floor((gameDate − now)/1000)` (P1/P7); `previewNextPoll()` pins nothing
   (P8). (contracts/poll-pin-integration.md.)
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] In `src/services/poll-service.ts` `postOrReplaceNextPoll`, after the keyset is
+- [X] T010 [US1] In `src/services/poll-service.ts` `postOrReplaceNextPoll`, after the keyset is
   persisted and `recordPollPosted` runs, compute
   `secondsUntilGame = Math.floor((game.gameDate.getTime() − this.now().getTime()) / 1000)` and call
   `await this.wa.pinMessage(ref, secondsUntilGame)` best-effort: on `{ ok: false }` log at warn
@@ -126,14 +126,14 @@ depend on this phase (US1 needs `pinMessage`, US2 needs `unpinMessage`, US3 need
 
 ### Tests for User Story 2 ⚠️ (write first, ensure they FAIL)
 
-- [ ] T011 [US2] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with an
+- [X] T011 [US2] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with an
   existing poll and `force: true`, the old poll is unpinned **before** it is deleted and the new poll
   is pinned (P3); with `FakeGateway.deleteOutcomeOverride = { ok: false, … }`, the old poll is still
   unpinned first and replacement completes (P4). (Same test file as T009 — sequential.)
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] In `src/services/poll-service.ts` `removeExistingPoll`, call
+- [X] T012 [US2] In `src/services/poll-service.ts` `removeExistingPoll`, call
   `await this.wa.unpinMessage({ id: poll.pollMessageId, groupId: poll.groupId })` **before**
   `this.wa.deleteMessage(...)`; on `{ ok: false }` log at warn and continue (best-effort). Order:
   delete DB rows → unpin → delete WhatsApp message. Make T011 pass. (FR-005.)
@@ -151,7 +151,7 @@ the poll is still posted/replaced, the keyset persisted, and a subsequent vote s
 
 ### Tests for User Story 3 ⚠️ (write first, ensure they FAIL)
 
-- [ ] T013 [US3] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with
+- [X] T013 [US3] Add integration tests to `tests/integration/whatsapp/poll-service.test.ts`: with
   `pinOutcomeOverride = { ok: false, reason: 'unknown' }`, `postOrReplaceNextPoll()` still returns
   `posted`, persists the keyset, stamps `lastPollPostedAt`, and a following `handlePollVote` is
   recorded (P2); with `unpinOutcomeOverride = { ok: false }` on replacement, the post still completes
@@ -159,7 +159,7 @@ the poll is still posted/replaced, the keyset persisted, and a subsequent vote s
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Harden the two call sites in `src/services/poll-service.ts` so pin/unpin are strictly
+- [X] T014 [US3] Harden the two call sites in `src/services/poll-service.ts` so pin/unpin are strictly
   best-effort: ensure neither a `{ ok: false }` outcome nor an unexpected rejection can abort the
   flow — wrap each call so a throw is caught + logged (defensive; the Gateway already returns outcomes
   rather than throwing on send failure, but the MVP must not depend on that). Make T013 pass. (FR-006.)
@@ -170,10 +170,10 @@ the poll is still posted/replaced, the keyset persisted, and a subsequent vote s
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T015 Run the typecheck + full test suite (`npm test`, `npm run typecheck` / `tsc --noEmit`) and
+- [X] T015 Run the typecheck + full test suite (`npm test`, `npm run typecheck` / `tsc --noEmit`) and
   confirm the new `IWhatsAppGateway` methods compile across all `PollService` call sites and the
   `FakeGateway`. Fix any fallout.
-- [ ] T016 Run quickstart.md validation (automated path): `npm test -- poll-service` passes; spot-check
+- [X] T016 Run quickstart.md validation (automated path): `npm test -- poll-service` passes; spot-check
   that logs on a forced pin failure are warn-level and contain no secrets.
 
 ---

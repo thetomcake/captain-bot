@@ -13,6 +13,7 @@ import type {
   IncomingMessage,
   MessageRef,
   DeleteOutcome,
+  PinOutcome,
   PollSpec,
   PollSendResult,
   PollVote,
@@ -24,6 +25,12 @@ export interface SentPoll {
   poll: PollSpec;
   ref: MessageRef;
   keyset: PollSendResult['keyset'];
+}
+
+/** One recorded pin: the message ref and the raw seconds-until-event the MVP requested (007). */
+export interface PinnedMessage {
+  ref: MessageRef;
+  durationSeconds: number;
 }
 
 export interface SentMessage {
@@ -58,11 +65,17 @@ export class FakeGateway implements IWhatsAppGateway {
   readonly sentPolls: SentPoll[] = [];
   readonly sentMessages: SentMessage[] = [];
   readonly deletedMessages: MessageRef[] = [];
+  readonly pinnedMessages: PinnedMessage[] = [];
+  readonly unpinnedMessages: MessageRef[] = [];
 
   /** When true, the next sendPoll() rejects (simulates a WhatsApp send failure). */
   failNextSendPoll = false;
   /** When set, every deleteMessage() returns this outcome instead of `{ ok: true }`. */
   deleteOutcomeOverride: DeleteOutcome | null = null;
+  /** When set, every pinMessage() returns this outcome instead of `{ ok: true }`. */
+  pinOutcomeOverride: PinOutcome | null = null;
+  /** When set, every unpinMessage() returns this outcome instead of `{ ok: true }`. */
+  unpinOutcomeOverride: PinOutcome | null = null;
 
   groups: GroupSummary[] = [{ id: TEST_GROUP_ID, name: 'Test Group', addressingMode: 'pn' }];
 
@@ -125,6 +138,16 @@ export class FakeGateway implements IWhatsAppGateway {
     return this.deleteOutcomeOverride ?? { ok: true };
   }
 
+  async pinMessage(ref: MessageRef, durationSeconds: number): Promise<PinOutcome> {
+    this.pinnedMessages.push({ ref, durationSeconds });
+    return this.pinOutcomeOverride ?? { ok: true };
+  }
+
+  async unpinMessage(ref: MessageRef): Promise<PinOutcome> {
+    this.unpinnedMessages.push(ref);
+    return this.unpinOutcomeOverride ?? { ok: true };
+  }
+
   onQR(handler: (qr: string) => void): void {
     this.qrHandlers.push(handler);
   }
@@ -176,8 +199,12 @@ export class FakeGateway implements IWhatsAppGateway {
     this.sentPolls.length = 0;
     this.sentMessages.length = 0;
     this.deletedMessages.length = 0;
+    this.pinnedMessages.length = 0;
+    this.unpinnedMessages.length = 0;
     this.failNextSendPoll = false;
     this.deleteOutcomeOverride = null;
+    this.pinOutcomeOverride = null;
+    this.unpinOutcomeOverride = null;
     this.connected = false;
     this.connectionStatus = 'closed';
     this.seq = 0;

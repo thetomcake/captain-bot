@@ -16,6 +16,7 @@ export type {
   IncomingMessage,
   MessageRef,
   DeleteOutcome,
+  PinOutcome,
   PollSpec,
   PollKeyset,
   PollRef,

@@ -19,6 +19,7 @@ describe('PollService (Gateway-native)', () => {
   let testDb: TestDatabase;
   let gateway: FakeGateway;
   let pollService: PollService;
+  let fixtureService: FixtureService;
   let teamId: number;
 
   /** Build a PollVote delta for the most-recently-posted poll. */
@@ -39,7 +40,7 @@ describe('PollService (Gateway-native)', () => {
 
     gateway = new FakeGateway();
     const seasonService = new SeasonService(db);
-    const fixtureService = new FixtureService(db, seasonService, new MockFixtureScraper());
+    fixtureService = new FixtureService(db, seasonService, new MockFixtureScraper());
     pollService = new PollService(db, fixtureService, gateway, TEST_GROUP_ID);
 
     const [team] = await db
@@ -196,6 +197,115 @@ describe('PollService (Gateway-native)', () => {
       expect(polls).toHaveLength(1);
 
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('auto-pin the poll until game time (007)', () => {
+    // A fixed, deterministic clock far in the past so the pin window is positive and the computed
+    // duration is asserted without real-clock dependence (FR-008). Fixtures are still real-future
+    // dated relative to the FixtureService's own clock, so the next fixture resolves normally.
+    const FIXED_NOW = new Date('2020-06-01T12:00:00Z');
+
+    /** Build a PollService whose pin window is computed against {@link FIXED_NOW}. */
+    function clockedService(now: Date = FIXED_NOW): PollService {
+      return new PollService(testDb.db, fixtureService, gateway, TEST_GROUP_ID, undefined, () => now);
+    }
+
+    it('pins the new poll for the window until game time (US1 P1/P7)', async () => {
+      const result = await clockedService().postOrReplaceNextPoll();
+      expect(result.outcome).toBe('posted');
+      expect(gateway.pinnedMessages).toHaveLength(1);
+
+      const pin = gateway.pinnedMessages[0]!;
+      const sent = gateway.sentPolls[0]!;
+      expect(pin.ref.id).toBe(sent.ref.id);
+
+      // P7: durationSeconds equals floor((gameDate − now)/1000) exactly.
+      const fixture = (result as Extract<typeof result, { fixture: unknown }>).fixture;
+      const expected = Math.floor((fixture.gameDate.getTime() - FIXED_NOW.getTime()) / 1000);
+      expect(pin.durationSeconds).toBe(expected);
+    });
+
+    it('previewNextPoll pins (and unpins) nothing (US1 P8)', async () => {
+      await clockedService().previewNextPoll();
+      expect(gateway.pinnedMessages).toHaveLength(0);
+      expect(gateway.unpinnedMessages).toHaveLength(0);
+    });
+
+    it('unpins the old poll BEFORE deleting it, then pins the new one on force-replace (US2 P3)', async () => {
+      const svc = clockedService();
+      await svc.postOrReplaceNextPoll();
+      const oldId = gateway.sentPolls[0]!.ref.id;
+
+      const unpinSpy = vi.spyOn(gateway, 'unpinMessage');
+      const deleteSpy = vi.spyOn(gateway, 'deleteMessage');
+
+      const result = await svc.postOrReplaceNextPoll({ force: true });
+      expect(result.outcome).toBe('replaced');
+
+      expect(gateway.unpinnedMessages.map((r) => r.id)).toContain(oldId);
+      expect(gateway.deletedMessages.map((r) => r.id)).toContain(oldId);
+      // The unpin must precede the delete (FR-005).
+      expect(unpinSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+        deleteSpy.mock.invocationCallOrder[0]!
+      );
+      // The freshly posted poll is pinned.
+      const newId = gateway.sentPolls[1]!.ref.id;
+      expect(gateway.pinnedMessages.map((p) => p.ref.id)).toContain(newId);
+
+      unpinSpy.mockRestore();
+      deleteSpy.mockRestore();
+    });
+
+    it('still unpins before a FAILING delete and completes replacement (US2 P4)', async () => {
+      const svc = clockedService();
+      await svc.postOrReplaceNextPoll();
+      const oldId = gateway.sentPolls[0]!.ref.id;
+      gateway.deleteOutcomeOverride = { ok: false, reason: 'network' };
+
+      const unpinSpy = vi.spyOn(gateway, 'unpinMessage');
+      const deleteSpy = vi.spyOn(gateway, 'deleteMessage');
+
+      const result = await svc.postOrReplaceNextPoll({ force: true });
+      expect(result.outcome).toBe('replaced');
+      expect(gateway.unpinnedMessages.map((r) => r.id)).toContain(oldId);
+      expect(unpinSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+        deleteSpy.mock.invocationCallOrder[0]!
+      );
+      const polls = await testDb.db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+
+      unpinSpy.mockRestore();
+      deleteSpy.mockRestore();
+    });
+
+    it('still posts, persists, stamps and tracks votes when the PIN fails (US3 P2)', async () => {
+      const svc = clockedService();
+      gateway.pinOutcomeOverride = { ok: false, reason: 'unknown' };
+
+      const result = await svc.postOrReplaceNextPoll();
+      expect(result.outcome).toBe('posted');
+
+      const polls = await testDb.db.select().from(schema.polls);
+      expect(polls).toHaveLength(1);
+      expect(await svc.getLastPollPostedAt()).not.toBeNull();
+
+      // A subsequent vote is still tracked (the failed pin did not break the flow).
+      await gateway.simulatePollVote(voteFor(IDENTITIES.alice, ['Yes']));
+      const responses = await testDb.db.select().from(schema.pollResponses);
+      expect(responses).toHaveLength(1);
+    });
+
+    it('still completes replacement when the UNPIN fails (US3 P5)', async () => {
+      const svc = clockedService();
+      await svc.postOrReplaceNextPoll();
+      gateway.unpinOutcomeOverride = { ok: false, reason: 'network' };
+
+      const result = await svc.postOrReplaceNextPoll({ force: true });
+      expect(result.outcome).toBe('replaced');
+      expect(gateway.sentPolls).toHaveLength(2);
+      const newId = gateway.sentPolls[1]!.ref.id;
+      expect(gateway.pinnedMessages.map((p) => p.ref.id)).toContain(newId);
     });
   });
 
