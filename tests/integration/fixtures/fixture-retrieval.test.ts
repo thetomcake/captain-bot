@@ -120,17 +120,17 @@ describe('Fixture Service Integration Tests', () => {
     });
   });
 
-  describe('syncFixtures', () => {
-    it('should update existing fixtures when re-syncing', async () => {
-      // First sync
+  describe('re-fetch (FR-003)', () => {
+    it('should update existing fixtures when re-fetching', async () => {
+      // First fetch
       await fixtureService.fetchFixtures(teamId);
 
       const firstSyncCount = await db.query.games.findMany({
         where: (games, { eq }) => eq(games.seasonId, seasonId),
       });
 
-      // Second sync
-      await fixtureService.syncFixtures(teamId);
+      // Second fetch
+      await fixtureService.fetchFixtures(teamId);
 
       const secondSyncCount = await db.query.games.findMany({
         where: (games, { eq }) => eq(games.seasonId, seasonId),
@@ -138,40 +138,6 @@ describe('Fixture Service Integration Tests', () => {
 
       // Count should be similar (accounting for possible new fixtures)
       expect(secondSyncCount.length).toBeGreaterThanOrEqual(firstSyncCount.length);
-    });
-
-    it('should detect fixture changes (FR-003)', async () => {
-      // First sync - store original fixtures
-      await fixtureService.fetchFixtures(teamId);
-
-      const originalGames = await db.query.games.findMany({
-        where: (games, { eq }) => eq(games.seasonId, seasonId),
-      });
-
-      // Manually change a fixture date to simulate rescheduling
-      const gameToUpdate = originalGames[0];
-      if (!gameToUpdate) {
-        // If no games, skip this test
-        expect(true).toBe(true);
-        return;
-      }
-
-      const newDate = new Date(gameToUpdate.gameDate);
-      newDate.setDate(newDate.getDate() + 7); // Move 1 week forward
-
-      await db
-        .update(schema.games)
-        .set({
-          gameDate: newDate,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.games.id, gameToUpdate.id));
-
-      // Sync again - should detect the change
-      const changes = await fixtureService.detectFixtureChanges(teamId);
-
-      expect(changes).toBeDefined();
-      expect(changes.rescheduled.length).toBeGreaterThanOrEqual(0);
     });
 
     it('should cache fixtures to avoid redundant scraping', async () => {
@@ -209,7 +175,7 @@ describe('Fixture Service Integration Tests', () => {
         .where(eq(schema.games.id, game!.id));
 
       // Re-check against the (unchanged) club website
-      await fixtureService.syncFixtures(teamId);
+      await fixtureService.fetchFixtures(teamId);
 
       const [refreshed] = await db.select().from(schema.games).where(eq(schema.games.id, game!.id));
 

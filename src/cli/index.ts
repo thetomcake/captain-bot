@@ -26,8 +26,8 @@ async function main(): Promise<void> {
   // Parse arguments with minimist (handles edge cases properly)
   const parsed = minimist(process.argv.slice(2), {
     string: ['config'],
-    boolean: ['help', 'version', 'json', 'show-responses'],
-    alias: { c: 'config', h: 'help', v: 'version' },
+    boolean: ['help', 'version', 'json', 'show-responses', 'yes', 'force'],
+    alias: { c: 'config', h: 'help', v: 'version', y: 'yes' },
   });
 
   // Handle version flag (before loading config)
@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     console.log('  connect    Connect to WhatsApp and list group JIDs');
     console.log('  daemon     Run WhatsApp monitoring daemon');
     console.log('  seasons    View season history');
+    console.log('  end-of-season  End the current season (manual rollover)');
     console.log('');
     console.log('Global Options:');
     console.log('  --config, -c <path>  Config file path (default: .env)');
@@ -168,6 +169,32 @@ async function main(): Promise<void> {
 
       const { seasonsCommand } = await import('./commands/seasons.js');
       await seasonsCommand({ json: parsed.json as boolean | undefined });
+      break;
+    }
+
+    case 'end-of-season': {
+      if (parsed.help) {
+        console.log('Usage: captain-stats end-of-season [options]');
+        console.log('');
+        console.log('End the current season (manual rollover). The next fixture fetch lazily');
+        console.log('starts the next season; games and stats from the ended season are preserved.');
+        console.log('');
+        console.log('Options:');
+        console.log('  --yes, -y        Skip the confirmation prompt');
+        console.log('  --force          Skip the confirmation prompt (alias of --yes)');
+        console.log('  --json           Output in JSON format');
+        console.log('  --config <path>  Config file path');
+        console.log('  --help           Show this help message');
+        process.exit(0);
+        break;
+      }
+
+      const { endOfSeasonCommand } = await import('./commands/end-of-season.js');
+      await endOfSeasonCommand({
+        yes: parsed.yes as boolean | undefined,
+        force: parsed.force as boolean | undefined,
+        json: parsed.json as boolean | undefined,
+      });
       break;
     }
 

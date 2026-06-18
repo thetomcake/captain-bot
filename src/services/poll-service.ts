@@ -276,7 +276,7 @@ export class PollService {
     if (!team) return { kind: 'no-fixture' };
 
     try {
-      await this.fixtures.syncFixtures(team.id);
+      await this.fixtures.fetchFixtures(team.id);
     } catch (error) {
       return {
         kind: 'fetch-failed',

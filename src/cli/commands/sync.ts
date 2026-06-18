@@ -20,15 +20,12 @@ export async function syncCommand(options: SyncOptions = {}): Promise<void> {
 
     console.log('Syncing fixtures from club website...');
 
-    // Fetch and sync fixtures (also detects season transitions, FR-005)
-    const result = await fixtureService.syncFixtures(teamId);
+    // Fetch fixtures into the current season. Season rollover is manual (FR-011) — the next season
+    // is started by `end-of-season`, then lazily created on the following fetch (FR-012); a sync
+    // never transitions seasons on its own.
+    const games = await fixtureService.fetchFixtures(teamId);
 
-    if (result.seasonTransition) {
-      console.log(
-        `✓ Season transition detected — started season ${result.newSeasonNumber} (previous season preserved)`
-      );
-    }
-    console.log(`✓ Synced ${result.games.length} fixtures`);
+    console.log(`✓ Synced ${games.length} fixtures`);
 
     process.exit(0);
   } catch (error) {

@@ -48,6 +48,18 @@ honest:
    getScraper→fetchHtml→parse→normalise call-sites in `fixture-service.ts` (`fetchFixtures`,
    `syncFixtures`, `detectFixtureChanges`) were collapsed into one private `scrapeOurFixtures(team)`
    method. No behavioural change.
+4. **`detectFixtureChanges` removed as dead code (post-Phase-7 cleanup, 2026-06-18).**
+   `FixtureService.detectFixtureChanges` (plus its `FixtureChanges`/`FixtureChange` types) had **no
+   production caller** — only one self-defeating test in `fixture-retrieval.test.ts` (it bailed with
+   `expect(true).toBe(true)` when no games existed, else asserted `rescheduled.length >= 0`, always
+   true). Git history confirms it was test-only since its introduction in an earlier story; it was
+   never wired into the CLI / `poll-service` / daemon. The live re-check behaviour it duplicated
+   (re-scrape → reflect changed venue/status) is already handled by `fetchFixtures` →
+   `persistScrapedFixtures`. After the T019 consolidation made `fetchFixtures` the single load path,
+   it was the last orphan of the retired sync machinery. Removed the method, its two types, and the
+   test; `scrapeOurFixtures` now has a single caller (`fetchFixtures`) and its doc comment was
+   updated. Build green; suite 279 → 278 (the one removed dead test). No FR in this spec referenced
+   it.
 
 ---
 
@@ -137,11 +149,11 @@ genuine future game; verify the past `-` game is ignored and the future game is 
 
 ### Tests for User Story 3 (write FIRST, ensure they FAIL/PASS-as-guard) ⚠️
 
-- [ ] T013 [P] [US3] FAILING integration tests in `tests/integration/fixtures/score-lag-us3.test.ts` (static score-lag fixture + a faked `now` chosen between the past and future weeks): a past game still showing `-` plus a later future game → future selected, past `-` ignored (AS1/SC-004); only-`-`-fixture-is-past → no confirmed next fixture (AS2); a game later **today** not yet kicked off → treated as upcoming and selected (AS3).
+- [X] T013 [P] [US3] FAILING integration tests in `tests/integration/fixtures/score-lag-us3.test.ts` (static score-lag fixture + a faked `now` chosen between the past and future weeks): a past game still showing `-` plus a later future game → future selected, past `-` ignored (AS1/SC-004); only-`-`-fixture-is-past → no confirmed next fixture (AS2); a game later **today** not yet kicked off → treated as upcoming and selected (AS3). **Done — 3 tests green (pass-as-guard: the existing query already satisfies the rule once US1/US2 corrected the inputs; see T014).**
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Confirm the future-date guard in the selection path: `FixtureService.getUpcomingFixtures` filters `status = 'upcoming'` AND `gameDate >= now` (using the injectable `now` introduced in T008), and `parseGameDateTime` stores date **+ kickoff time** so "later today" counts as future (FR-008/FR-004, research §3). Make the minimal fix only if T013 reveals a gap (e.g. time-of-day not honoured); otherwise document that the guard is satisfied by the existing query once US1/US2 corrected the inputs. (`src/services/fixture-service.ts`.)
+- [X] T014 [US3] Confirm the future-date guard in the selection path: `FixtureService.getUpcomingFixtures` filters `status = 'upcoming'` AND `gameDate >= now` (using the injectable `now` introduced in T008), and `parseGameDateTime` stores date **+ kickoff time** so "later today" counts as future (FR-008/FR-004, research §3). Make the minimal fix only if T013 reveals a gap (e.g. time-of-day not honoured); otherwise document that the guard is satisfied by the existing query once US1/US2 corrected the inputs. (`src/services/fixture-service.ts`.) **No code change needed — guard satisfied as-is: `getUpcomingFixtures` already filters `status='upcoming' AND gameDate >= now`, and `parseGameDateTime` stores date + kickoff time so a later-today fixture (19:30 vs a 10:00 `now`) counts as future. T013's 3 cases all pass against the unchanged query.**
 
 **Checkpoint**: US1 + US2 + US3 — selection is correct for boundary and score-lag cases.
 
@@ -162,16 +174,16 @@ may start right after Phase 1.
 
 ### Tests for User Story 4 (write FIRST, ensure they FAIL) ⚠️
 
-- [ ] T015 [P] [US4] FAILING command tests in `tests/integration/cli/end-of-season.test.ts` (in-memory DB, injected `confirm`): confirm-by-default ends the season only when confirmed and is a no-op when declined (AS3); `--yes`/`--force` skips the prompt (AS4); no current season → reports "no active season to end", no changes, exit 0 (AS5); JSON output shape per contract.
-- [ ] T016 [P] [US4] FAILING integration tests in `tests/integration/seasons/manual-rollover-us4.test.ts`: `endSeason` marks `is_current=false` + sets `end_date`, preserving the season's games/stats (AS1/SC-008); the next `fetchFixtures`/`syncFixtures` lazily creates the next `season_number` via `getOrCreateCurrentSeason` and stores new fixtures there, previous season unmodified (AS2/FR-012); repeated fetches within a season trigger NO automatic transition (AS6/SC-009).
+- [X] T015 [P] [US4] FAILING command tests in `tests/integration/cli/end-of-season.test.ts` (in-memory DB, injected `confirm`): confirm-by-default ends the season only when confirmed and is a no-op when declined (AS3); `--yes`/`--force` skips the prompt (AS4); no current season → reports "no active season to end", no changes, exit 0 (AS5); JSON output shape per contract. **Done — 8 tests green.**
+- [X] T016 [P] [US4] FAILING integration tests in `tests/integration/seasons/manual-rollover-us4.test.ts`: `endSeason` marks `is_current=false` + sets `end_date`, preserving the season's games/stats (AS1/SC-008); the next `fetchFixtures` lazily creates the next `season_number` via `getOrCreateCurrentSeason` and stores new fixtures there, previous season unmodified (AS2/FR-012); repeated fetches within a season trigger NO automatic transition (AS6/SC-009). **Done — 3 tests green. (Written against `fetchFixtures`, the consolidated single load path from T019.)**
 
 ### Implementation for User Story 4
 
-- [ ] T017 [US4] Create `src/cli/commands/end-of-season.ts`: resolve current season (teamId 1); if none → message + no change + exit 0; else display the season number and confirm via injectable `deps.confirm?: () => Promise<boolean>` (default reads y/N from stdin), bypassed by `--yes`/`--force`; on proceed call `SeasonService.endSeason(season.id)`; support `--json`; exit codes per `contracts/cli-end-of-season.md` (FR-010/FR-013). Any settings needed are read via the loaded config (`getEnv()`), not direct `process.env` access (Clarifications).
-- [ ] T018 [US4] Register the `end-of-season` command in `src/cli/index.ts`: route to `endOfSeasonCommand`, parse `--yes`/`--force`/`--json`, add command-level `--help`, and add it to the usage/commands list.
-- [ ] T019 [US4] Retire the automatic season transition in `src/services/fixture-service.ts`: remove the `shouldCreateNewSeason` → `createNewSeason` branch from `syncFixtures` so it only fetches + persists into the current season via `getOrCreateCurrentSeason`; adjust `SyncResult` (drop or always-false `seasonTransition`/`newSeasonNumber`) (FR-011). (Same file as T008 — different method; coordinate edits.) **Convergence point: once the transition branch is gone, `syncFixtures` and `fetchFixtures` do the same thing (both `scrapeOurFixtures` → `persistScrapedFixtures` into the current season) — consolidate them into a single method here and update the two callers (`sync` command, `PollService.resolveNextFixture`). This is why the post-Phase-3 review left the duplication in place (see "Ad-hoc changes").**
-- [ ] T020 [US4] Update `src/cli/commands/sync.ts` to stop announcing season transitions (consume the adjusted `SyncResult`); verify lazy new-season creation still occurs on fetch (FR-012).
-- [ ] T021 [US4] Retire `SeasonService.shouldCreateNewSeason` (and its helpers `fixtureKey`/`toDateKey` if now unused) from `src/services/season-service.ts`, and remove/retire its dedicated 003 tests so the suite reflects manual-only rollover (FR-011). Leave `endSeason`/`getOrCreateCurrentSeason`/`createNewSeason` intact.
+- [X] T017 [US4] Create `src/cli/commands/end-of-season.ts`: resolve current season (teamId 1); if none → message + no change + exit 0; else display the season number and confirm via injectable `deps.confirm?: () => Promise<boolean>` (default reads y/N from stdin), bypassed by `--yes`/`--force`; on proceed call `SeasonService.endSeason(season.id)`; support `--json`; exit codes per `contracts/cli-end-of-season.md` (FR-010/FR-013). Any settings needed are read via the loaded config (`getEnv()`), not direct `process.env` access (Clarifications).
+- [X] T018 [US4] Register the `end-of-season` command in `src/cli/index.ts`: route to `endOfSeasonCommand`, parse `--yes`/`--force`/`--json`, add command-level `--help`, and add it to the usage/commands list. **Done — `--yes`/`-y`/`--force` added to minimist boolean flags; routing + help + usage entry added. Verified end-to-end through the built binary (decline/--yes/no-op paths).**
+- [X] T019 [US4] Retire the automatic season transition in `src/services/fixture-service.ts`: removed the `shouldCreateNewSeason` → `createNewSeason` branch (FR-011). **Consolidated: `syncFixtures` and `SyncResult` were deleted entirely — `fetchFixtures` is now the single load path (`scrapeOurFixtures` → `persistScrapedFixtures` into `getOrCreateCurrentSeason`), with callers `sync` command (T020) and `PollService.resolveNextFixture` updated to call it.**
+- [X] T020 [US4] Update `src/cli/commands/sync.ts` to stop announcing season transitions; it now calls `fetchFixtures` and reports the stored count. Lazy new-season creation still occurs on fetch via `getOrCreateCurrentSeason` (FR-012).
+- [X] T021 [US4] Retired `SeasonService.shouldCreateNewSeason` and its helpers `fixtureKey`/`toDateKey` (now unused) from `src/services/season-service.ts`, and removed its dedicated 003 tests (`tests/integration/seasons/season-transition.test.ts`) so the suite reflects manual-only rollover (FR-011). `endSeason`/`getOrCreateCurrentSeason`/`createNewSeason` left intact.
 
 **Checkpoint**: All four user stories independently functional.
 
@@ -179,9 +191,9 @@ may start right after Phase 1.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T022 [P] Sweep for any remaining consumers of the removed auto-transition (`seasonTransition`/`newSeasonNumber`, `shouldCreateNewSeason`) across `src/` and `tests/`; remove dead references (FR-011).
-- [ ] T023 Run the full suite (`npm run build && npm test`) and confirm green with no regressions vs the T001 baseline (SC-007); fix any fallout.
-- [ ] T024 Execute the `quickstart.md` validation scenarios (US1–US4 tables), including the `end-of-season` manual checks, and confirm expected outcomes.
+- [X] T022 [P] Swept `src/` + `tests/` for consumers of the removed auto-transition (`seasonTransition`/`newSeasonNumber`, `shouldCreateNewSeason`, `syncFixtures`, `SyncResult`): updated `fixture-retrieval.test.ts` (`syncFixtures` → `fetchFixtures`, describe renamed) and a stale doc comment in `fixture-service.ts`; removed `season-transition.test.ts`. Remaining `newSeasonNumber` hits are unrelated local vars inside `getOrCreateCurrentSeason`/`createNewSeason` (FR-011).
+- [X] T023 `npm run build` green; `npm test` green — **279 tests across 35 files**, no regressions vs the T001 baseline (260/31; delta = +US3/US4 test files, −retired `season-transition.test.ts`) (SC-007).
+- [X] T024 Validated the `quickstart.md` scenarios: US1 1–3/8 (`next-fixture-us1.test.ts`), US2 4–5 (T010 units + composition), US3 6–7 (`score-lag-us3.test.ts`), US4 1–6 (`end-of-season.test.ts` + `manual-rollover-us4.test.ts`), plus the `end-of-season` manual checks end-to-end through the built binary (decline / `--yes` / no-current-season no-op). All expected outcomes met.
 
 ---
 
