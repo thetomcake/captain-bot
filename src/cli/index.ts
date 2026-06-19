@@ -25,8 +25,19 @@ const VERSION = packageJson.version;
 async function main(): Promise<void> {
   // Parse arguments with minimist (handles edge cases properly)
   const parsed = minimist(process.argv.slice(2), {
-    string: ['config'],
-    boolean: ['help', 'version', 'json', 'show-responses', 'yes', 'force'],
+    string: ['config', 'rank'],
+    boolean: [
+      'help',
+      'version',
+      'json',
+      'show-responses',
+      'yes',
+      'force',
+      'summary',
+      'players',
+      'attendance',
+      'report',
+    ],
     alias: { c: 'config', h: 'help', v: 'version', y: 'yes' },
   });
 
@@ -39,14 +50,9 @@ async function main(): Promise<void> {
   // Get command from positional arguments
   const command = parsed._[0];
 
-  // Handle global help flag only if no command specified
-  if (parsed.help && !command) {
-    console.log('Captain Stats - MAN v FAT Football team management tool');
-    process.exit(0);
-  }
-
-  // Show usage if no command (before loading config)
+  // Show usage if no command (or global --help/-h) — before loading config
   if (!command) {
+    console.log('Captain Stats - MAN v FAT Football team management tool');
     console.log(`Captain Stats CLI v${VERSION}`);
     console.log('');
     console.log('Usage: captain-stats <command> [options]');
@@ -137,8 +143,14 @@ async function main(): Promise<void> {
         console.log('View stored statistics grouped by player (view-only)');
         console.log('');
         console.log('Options:');
-        console.log('  --game <id>        Show stats for a single game');
-        console.log('  --season <number>  Show stats for a whole season');
+        console.log('  --game <id>        Show raw stats for a single game');
+        console.log('  --season <number>  Show raw stats for a whole season (default: current)');
+        console.log('  --summary          Team season summary (totals, rates, turnout)');
+        console.log('  --players          Per-player aggregates & leaderboard');
+        console.log('  --rank <metric>    Order --players by: goals, assists, contributions,');
+        console.log('                     attendance, weightloss, foodtracking (default: goals)');
+        console.log('  --attendance       Per-player attendance % and average turnout');
+        console.log('  --report           Single paste-into-WhatsApp summary block');
         console.log('  --json             Output in JSON format');
         console.log('  --config <path>    Config file path');
         console.log('  --help             Show this help message');
@@ -150,6 +162,11 @@ async function main(): Promise<void> {
         game: parsed.game !== undefined ? parseInt(parsed.game) : undefined,
         season: parsed.season !== undefined ? parseInt(parsed.season) : undefined,
         json: parsed.json as boolean | undefined,
+        summary: parsed.summary as boolean | undefined,
+        players: parsed.players as boolean | undefined,
+        attendance: parsed.attendance as boolean | undefined,
+        report: parsed.report as boolean | undefined,
+        rank: parsed.rank as string | undefined,
       });
       break;
     }
