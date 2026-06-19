@@ -124,8 +124,10 @@ export function formatAttendanceJSON(report: AttendanceReport): string {
 
 /**
  * The shareable chat report (FR-016): a single contiguous block of plain `Label: value` lines plus
- * one line per attended player. **No fixed-width columns, box-drawing, ANSI, or pager** — WhatsApp
- * renders a proportional font that breaks aligned tables. Only attended players appear (FR-017).
+ * one line per attended player. Each player line shows season totals with the per-game rate in
+ * brackets (`12 goals (2.2 p/g)`), emoji-separated rather than comma-separated. **No fixed-width
+ * columns, box-drawing, ANSI, or pager** — WhatsApp renders a proportional font that breaks aligned
+ * tables. Only attended players appear (FR-017).
  */
 export function formatReportBlock(report: {
   season: SeasonAggregate;
@@ -143,17 +145,12 @@ export function formatReportBlock(report: {
     `Avg weight-loss/week: ${percent(season.squadWeightLossRate)}`,
     `Avg food-tracking/week: ${percent(season.squadFoodTrackingRate)}`,
     '',
-    'Players (attended players only):',
+    'Players:',
   ];
 
   for (const p of attended) {
     lines.push(
-      `- ${name(p)} — ${decimal(p.goalsPerGame, 2)} goals, ${decimal(
-        p.assistsPerGame,
-        2
-      )} assists per game · food ${percent(p.foodTrackingRate)} · weight-loss ${percent(
-        p.weightLossRate
-      )}`
+      `- ${name(p)} — ⚽ ${p.totalGoals} goals (${decimal(p.goalsPerGame, 1)} p/g) 🅰️ ${p.totalAssists} assists (${decimal(p.assistsPerGame, 1)} p/g) 🍽️ food tracking ${percent(p.foodTrackingRate)} 📉 weight-loss ${percent(p.weightLossRate)}`
     );
   }
 

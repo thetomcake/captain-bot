@@ -108,9 +108,9 @@ Assists: 19  (avg 2.38/game)
 Avg weight-loss/week: 61%
 Avg food-tracking/week: 78%
 
-Players (attended players only):
-- Alice — 1.50 goals, 0.50 assists per game · food 75% · weight-loss 38%
-- Bob — 1.29 goals, 1.00 assists per game · food 60% · weight-loss n/a
+Players:
+- Alice — ⚽ 12 goals (1.5 p/g) 🅰️ 4 assists (0.5 p/g) 🍽️ food tracking 75% 📉 weight-loss 38%
+- Bob — ⚽ 9 goals (1.3 p/g) 🅰️ 7 assists (1.0 p/g) 🍽️ food tracking 60% 📉 weight-loss n/a
 ...
 ```
 

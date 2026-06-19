@@ -14,6 +14,7 @@ import type { IWhatsAppGateway, IncomingMessage } from './gateway-port.js';
 import type { StatService } from '../services/stat-service.js';
 import type { PollService } from '../services/poll-service.js';
 import { isPostPollCommand } from './postpoll-trigger.js';
+import { isStatsCommand } from './stats-trigger.js';
 import { logger } from '../utils/logger.js';
 
 export interface EventRouterDeps {
@@ -22,6 +23,8 @@ export interface EventRouterDeps {
   pollService: PollService;
   /** The bound `!postpoll` handler from {@link createPostPollHandler}. */
   handlePostPoll: (message: IncomingMessage) => void | Promise<void>;
+  /** The bound `!stats` handler from {@link createStatsHandler}. */
+  handleStats: (message: IncomingMessage) => void | Promise<void>;
 }
 
 /**
@@ -29,13 +32,17 @@ export interface EventRouterDeps {
  * — call once during daemon startup.
  */
 export function registerEventRouter(deps: EventRouterDeps): void {
-  const { gateway, statService, pollService, handlePostPoll } = deps;
+  const { gateway, statService, pollService, handlePostPoll, handleStats } = deps;
 
   gateway.onMessage(async (message) => {
     try {
-      // FR-029: the command is intercepted before stat extraction so it is never captured.
+      // Commands are intercepted before stat extraction so they are never captured as a stat.
       if (isPostPollCommand(message.text)) {
         await handlePostPoll(message);
+        return;
+      }
+      if (isStatsCommand(message.text)) {
+        await handleStats(message);
         return;
       }
       await statService.captureFromMessage(message);

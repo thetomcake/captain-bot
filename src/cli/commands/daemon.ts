@@ -17,8 +17,10 @@ import { SeasonService } from '../../services/season-service.js';
 import { FixtureService } from '../../services/fixture-service.js';
 import { PollService } from '../../services/poll-service.js';
 import { StatService } from '../../services/stat-service.js';
+import { AggregateService } from '../../services/aggregate-service.js';
 import { registerEventRouter } from '../../whatsapp/event-router.js';
 import { createPostPollHandler } from '../../whatsapp/postpoll-trigger.js';
+import { createStatsHandler } from '../../whatsapp/stats-trigger.js';
 import { renderQr } from '../output/qr.js';
 import { logger } from '../../utils/logger.js';
 
@@ -58,9 +60,11 @@ export async function daemonCommand(_options: DaemonCommandOptions = {}): Promis
   const gateway = await createGateway({ db });
   const pollService = new PollService(db, fixtureService, gateway, groupId);
   const statService = new StatService(db);
+  const aggregateService = new AggregateService(db);
   const handlePostPoll = createPostPollHandler({ pollService, gateway, groupId });
+  const handleStats = createStatsHandler({ aggregateService, gateway, groupId });
 
-  registerEventRouter({ gateway, statService, pollService, handlePostPoll });
+  registerEventRouter({ gateway, statService, pollService, handlePostPoll, handleStats });
   gateway.onConnectionChange((status) => {
     logger.info('Connection state changed', { status });
     if (status === 'connected') {

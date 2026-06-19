@@ -83,6 +83,7 @@ describe('stat capture via event-router', () => {
       handlePostPoll: async () => {
         postPollCalls += 1;
       },
+      handleStats: async () => {},
     });
   });
 
