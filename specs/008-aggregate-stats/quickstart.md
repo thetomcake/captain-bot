@@ -4,7 +4,8 @@ Validation guide for the new aggregate views on the `stats` command. Proves the 
 correct aggregates from already-captured data, in both human and JSON form, across the spec's edge
 cases. Detailed shapes and rules live in [data-model.md](./data-model.md); command behaviour in
 [contracts/cli-stats-aggregates.md](./contracts/cli-stats-aggregates.md); the pure core in
-[contracts/aggregations.md](./contracts/aggregations.md).
+[contracts/aggregations.md](./contracts/aggregations.md); the `!stats` in-chat trigger (US5) in
+[contracts/whatsapp-stats-trigger.md](./contracts/whatsapp-stats-trigger.md).
 
 ## Prerequisites
 
@@ -79,6 +80,27 @@ followed by one line per attended player (avg goals/assists per attended game, f
 weight-loss %). The human form has no fixed-width columns, box characters, or ANSI — paste it
 straight into WhatsApp as one message. JSON emits `{ season, players }`. (FR-016, FR-017, FR-018,
 SC-007)
+
+### US5 — `!stats` in-chat report trigger (P2)
+
+Automated (authoritative): `npx vitest run tests/integration/whatsapp/stats-trigger.test.ts` — over
+`FakeGateway` + a real `:memory:` DB seeded with a current season, asserts a `!stats` message posts
+the report block, a second within the window is ignored, one after the window posts again, a no-data
+season posts the "no data" message, and ordinary chat is ignored.
+
+Manual (in a running daemon connected to the authorized group):
+
+```text
+# In the WhatsApp group:
+!stats
+```
+
+Expect: the daemon posts the current season's report block (identical content to
+`stats --report`) back into the group — the posted message is the response. A second `!stats` within
+5 minutes posts nothing (silently throttled); after 5 minutes it posts again. With no current-season
+data, it posts the report's "no data" message. A message merely containing the word "stats" does
+nothing. The post is rate-limited by the same Gateway outbound queue as every other message.
+(FR-019, FR-020, FR-021, FR-022, SC-008)
 
 ## Edge-case checks (SC-004)
 

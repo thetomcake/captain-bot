@@ -14,6 +14,13 @@ US2), `--attendance` (turnout, US3), and `--report` (a single paste-into-WhatsAp
 The legacy `stats --game` / `stats --season` raw per-game line views are left untouched. Scope is
 **season-only** in v1 (all-time deferred, Q4). No schema change, no new write path, no new dependency.
 
+A second surface — **US5, the in-chat `!stats` WhatsApp trigger** (added 2026-06-19; FR-019–FR-022) —
+posts the `--report` block straight into the authorized group, modelled closely on the existing
+`!postpoll` trigger. It is a thin presentation reuse of the same `aggregateReport` calc (FR-013) over
+the **current** season, with a 5-minute anti-spam throttle and the Gateway's existing outbound
+rate-limiter — **no** new computation, schema, dependency, or write path. See the
+[`!stats` trigger amendment](#amendment-2026-06-19--stats-whatsapp-report-trigger-us5) below.
+
 Two design decisions shape everything:
 
 1. **The calculation is separated from both the database and the CLI** (FR-013). A pure module
@@ -140,7 +147,8 @@ specs/008-aggregate-stats/
 ├── quickstart.md        # Phase 1 output (runnable validation scenarios)
 ├── contracts/
 │   ├── cli-stats-aggregates.md  # The new `stats` aggregate/report flags (flags, exit codes, output)
-│   └── aggregations.md          # The pure aggregation core's input/output contract (FR-013)
+│   ├── aggregations.md          # The pure aggregation core's input/output contract (FR-013)
+│   └── whatsapp-stats-trigger.md # US5 — the `!stats` in-chat trigger (FR-019–FR-022)
 └── tasks.md             # Phase 2 output (/speckit-tasks — NOT created here)
 ```
 
@@ -156,19 +164,27 @@ src/
 │   ├── stat-service.ts          # (existing) stat capture + raw read queries
 │   ├── poll-service.ts          # (existing) poll responses read model
 │   └── aggregate-service.ts     # NEW — fetch season rows, build participation, delegate
-└── cli/
-    ├── commands/
-    │   └── stats.ts             # MODIFIED — add --summary/--players/--attendance/--report views
-    ├── output/
-    │   ├── formatters.ts        # (existing) raw stats/fixtures/seasons formatters
-    │   └── aggregate-formatters.ts  # NEW — table + JSON per view; chat-safe report formatter
-    └── index.ts                 # MODIFIED — extend the `stats` route + help text with new flags
+├── cli/
+│   ├── commands/
+│   │   ├── stats.ts            # MODIFIED — add --summary/--players/--attendance/--report views
+│   │   └── daemon.ts           # MODIFIED (US5) — wire AggregateService + `!stats` handler into the router
+│   ├── output/
+│   │   ├── formatters.ts       # (existing) raw stats/fixtures/seasons formatters
+│   │   └── aggregate-formatters.ts  # NEW — table + JSON per view; chat-safe report formatter (reused by US5)
+│   └── index.ts                # MODIFIED — extend the `stats` route + help text with new flags
+└── whatsapp/
+    ├── event-router.ts         # MODIFIED (US5) — gate `!stats` before stat extraction, beside `!postpoll`
+    ├── postpoll-trigger.ts     # (existing) the trigger US5 is modelled on
+    └── stats-trigger.ts        # NEW (US5) — isStatsCommand + createStatsHandler (throttle, post report)
 
 tests/
 ├── unit/stats/
 │   └── aggregations.test.ts     # NEW — pure aggregation maths (SC-002 hand calcs, attended-games edge cases)
-└── integration/stats/
-    └── stats-aggregates.test.ts # NEW — extended stats CLI: summary/players/attendance/report, no-data, not-found, json, rank
+└── integration/
+    ├── stats/
+    │   └── stats-aggregates.test.ts # NEW — extended stats CLI: summary/players/attendance/report, no-data, not-found, json, rank
+    └── whatsapp/
+        └── stats-trigger.test.ts    # NEW (US5) — `!stats`: posts report, throttle window, no-data, ignores ordinary chat
 ```
 
 **Structure Decision**: Single-project CLI layout (Option 1). The feature slots into the established
@@ -179,3 +195,93 @@ than adding a new command file. No new top-level directory.
 ## Complexity Tracking
 
 > No Constitution Check violations — this section intentionally left empty.
+
+## Amendment 2026-06-19 — `!stats` WhatsApp report trigger (US5)
+
+This amendment adds the in-chat surface for the report (US5, FR-019–FR-022). It is deliberately a
+**thin trigger over the work already planned above** — it reuses `AggregateService.getReport`
+(FR-013) and the chat-safe `formatReportBlock` (FR-016) verbatim and adds **no** aggregation,
+schema, dependency, or write path. It is modelled one-for-one on the existing `!postpoll` trigger
+(`src/whatsapp/postpoll-trigger.ts`).
+
+### Design
+
+A new pure-ish trigger module `src/whatsapp/stats-trigger.ts`, mirroring `postpoll-trigger.ts`:
+
+- `isStatsCommand(text)` — true iff the whole trimmed, lower-cased message equals `!stats` (FR-019).
+  A message that merely contains "stats" is ordinary chat. The event-router calls it **before** stat
+  extraction so the command is never captured as a stat.
+- `STATS_MIN_INTERVAL_MS = 5 * 60 * 1000` — the anti-spam window (FR-021), exported like
+  `POSTPOLL_MIN_INTERVAL_MS`.
+- `createStatsHandler(deps)` → `(message) => Promise<void>`. Deps:
+  `{ aggregateService: AggregateService, gateway: IWhatsAppGateway, groupId: string, minIntervalMs?, now? }`.
+
+Handler flow (mirrors `handlePostPoll`):
+
+1. **Throttle (FR-021)** — if a report was posted within `minIntervalMs`, log and return (silent
+   in-chat). Unlike `!postpoll`, which reads `teams.lastPollPostedAt` (a column that exists because a
+   poll *is* a persisted artifact), a `!stats` report is **not** stored, so the last-posted time is
+   held **in process memory** in the handler closure (a `lastPostedAt: number | null`, advanced via
+   the injectable `now()`/`Date.now`). This keeps feature 008's "no schema change / no new write
+   path" property intact; per the spec assumption the window need not survive a daemon restart (it is
+   purely an anti-spam guard). Tests inject `now` to cross the window deterministically (the
+   `!postpoll` test backdates the DB column — the in-memory equivalent is a controllable clock).
+2. **Resolve the current season** — `aggregateService.resolveSeason()` (no arg ⇒ current). A
+   `not-found` result (no current season at all) is treated as **no data**.
+3. **Compute the report** — `aggregateService.getReport(season.id)`. If `season.hasData` is false (or
+   the season was not-found), post the report's **"no data"** message rather than an empty block
+   (FR-020, consistent with the CLI `--report` no-data path and FR-011).
+4. **Post** — otherwise `gateway.sendMessage(groupId, formatReportBlock({ season, players }))`. The
+   posted block **is** the success response (unlike `!postpoll`, which is silent on success).
+5. **Advance the throttle** — set `lastPostedAt = now()` after **any** posted message (report *or*
+   no-data) so repeats are suppressed for 5 minutes either way.
+6. **Errors (FR-022)** — wrap the compute/post in try/catch: log and return, never throw (the router
+   also has an outer catch). No partial/malformed report is posted. Every outcome
+   (`posted` / `no-data` / `throttled` / `failure`) is logged.
+
+**p-queue / outbound throttle (FR-020):** the report is sent through `gateway.sendMessage`, which
+already wraps every send in the Gateway's `RateLimiter` (`sendLimiter.execute(...)`, p-queue,
+`intervalCap=1` over `minMessageDelayMs`, ≤5 msg/min). So `!stats` is dispatched and rate-limited by
+the **same** outbound queue as `!postpoll`'s poll send and reply — the trigger does **not** introduce
+or bypass any dispatch path. The FR-021 5-minute cooldown and this gateway rate-limiter are two
+distinct, complementary throttles.
+
+### Wiring
+
+- `src/whatsapp/event-router.ts` — add a `handleStats` dep and gate `isStatsCommand(message.text)`
+  **first**, beside the existing `isPostPollCommand` check, returning before stat capture (FR-019).
+  Both command checks precede `statService.captureFromMessage`.
+- `src/cli/commands/daemon.ts` — construct `new AggregateService(db)` and
+  `createStatsHandler({ aggregateService, gateway, groupId })`, and pass `handleStats` to
+  `registerEventRouter`. No other daemon change (no scraper, no cron — `!stats` is a pure DB read).
+
+### Constitution re-check (US5)
+
+Still **PASSES**. **I. CLI-First** — the daemon is the CLI surface; `!stats` adds no new verb, only an
+in-chat trigger that reuses the report. **II. Test-First** — `isStatsCommand` matching and the handler
+(post / throttle / no-data / error / ignore-ordinary-chat) are integration-tested over `FakeGateway`
+with a real `:memory:` DB and `AggregateService`, written to fail first; output validation stays
+minimal (the chat-safe formatting is already asserted by the US4 report tests, not re-tested here).
+**III. TypeScript** — `#src/*` imports, `.js` extensions, strict. **IV. Security-First** — read-only
+derivation, no new inputs/credentials/write paths; any group member may trigger (FR-019), matching the
+accepted `!postpoll` trade-off (a report is read-only, so the footgun is even smaller — no votes are
+destroyed). Complexity Tracking remains empty.
+
+### Test plan (US5)
+
+`tests/integration/whatsapp/stats-trigger.test.ts`, mirroring `postpoll-trigger.test.ts`:
+
+- `isStatsCommand` — matches `!stats` / `  !Stats  ` / `!STATS`; rejects `stats`, `!stats now`,
+  `let's check stats`, `null`, `''`.
+- Handler over `FakeGateway` + a real `:memory:` DB seeded with a current season of games / stats /
+  poll responses + `AggregateService`:
+  - (a) `!stats` with seeded data → one `sentMessages` entry to `groupId` whose text matches
+    `formatReportBlock(getReport(...))` (the success response is the posted report).
+  - (b) current season with no qualifying data → one `sentMessages` entry carrying the "no data"
+    message (not an empty block).
+  - (c) ordinary chat (`"how were the stats"`) → nothing sent.
+  - (d) throttle: a second `!stats` within the window (real `STATS_MIN_INTERVAL_MS`) → still one
+    `sentMessages` entry (second ignored, silent); after advancing the injected `now` past the
+    window → a second report is posted.
+  - (e) compute/post failure (inject a failing gateway/service) → logged, nothing partial sent, no
+    throw.

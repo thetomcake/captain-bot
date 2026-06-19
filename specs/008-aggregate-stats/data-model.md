@@ -147,3 +147,15 @@ for the future WhatsApp surface (FR-013). The formatter renders a chat-safe bloc
 
 None. Aggregates are pure functions of the source rows at query time; there is no stored state, no
 transition, and no write path. Re-running a view after new stats/votes arrive simply recomputes.
+
+## US5 — `!stats` trigger (added 2026-06-19)
+
+The in-chat `!stats` trigger (US5, FR-019–FR-022) introduces **no persisted entity and no schema
+change** — it reuses the report shapes above (`SeasonAggregate` + `PlayerAggregate[]` via
+`aggregateReport`) and the chat-safe `formatReportBlock`. The only state it holds is an **in-process
+last-posted timestamp** (`lastPostedAt: number | null`) inside the handler closure, used solely for
+the 5-minute anti-spam throttle (FR-021). It is **not** durable — it resets on daemon restart (an
+accepted property per the spec assumption: a restart at worst allows one extra report). No table, no
+column, no migration. The report is sent via `gateway.sendMessage`, which already routes through the
+Gateway's outbound `RateLimiter` (p-queue) — the second, gateway-level throttle (FR-020), separate
+from the in-process cooldown.

@@ -12,7 +12,7 @@
 
 Today the captain can list raw per-game stat lines for a player or a season (`stats --game` / `stats --season`), with only simple season totals (goals, assists) computed in the view layer. There is no way to see roll-up numbers that describe how the team or an individual player is doing across a whole season — totals, per-game rates, attendance, and the lifestyle metrics (weight direction, food tracking) the club cares about.
 
-This feature adds **aggregated statistics**: derived, season-wide summaries computed from data already captured — games, stat records, and availability poll responses. The first delivery surface is the CLI. The summaries are designed so the same calculations can later be reused in other surfaces (e.g. a WhatsApp end-of-season message) without rework.
+This feature adds **aggregated statistics**: derived, season-wide summaries computed from data already captured — games, stat records, and availability poll responses. The first delivery surface is the CLI, with a second surface — an in-chat `!stats` WhatsApp trigger — that posts the shareable report directly into the team group. The summaries are designed so the same calculations are reused across both surfaces (and any future ones) without rework.
 
 ### Statistics identified from the data model
 
@@ -48,6 +48,7 @@ The data model supports the following derivable metrics (the captain does not ne
 - Q: Add a shareable, single-output report for chat? → A: Yes — a new `stats --report` mode emits, in one invocation, a single contiguous plain-text block (no pager/columns/ANSI) safe to paste into WhatsApp, plus a `--json` form. It contains a team section (avg attendance per game, total goals/assists, avg goals/assists per game, avg weight-loss % per week, avg food-tracking % per week — all over attended players only) and a per-player breakdown (avg goals/assists per attended game, food-tracking % of attended games, weight-loss % of attended games). "per week" = the squad-level rate across attended games (fixtures are ~weekly).
 - Q: Reconcile the report's "of attended games" with the just-agreed weight-loss/tracking denominator? → A: Unify on **attended games** everywhere — for every per-player rate (aggregate view AND report): weight-loss % = `(attended games with weightDirection=down) ÷ attended games`; food-tracking % = `(attended games with food tracked) ÷ attended games`. This supersedes the previous bullet's "÷ all reports" and FR-010's null-exclusion: an attended game with unknown weight / missing food data counts as a non-`down` / non-tracked game, not an exclusion. Squad lifestyle rates remain the mean of per-player rates.
 - Q: How is missing/null food-tracking data treated? → A: As a **NO (not tracked)** — the same default rule as `goals = 0`. When an attended game has no stat record, or the record's `foodTracking` is null, it is treated as `false` (not tracked) and counts toward the food-tracking denominator as a non-tracked game. (Food tracking is therefore a plain boolean default, with no separate "unknown" state — unlike weight direction.)
+- Q: Add an in-chat `!stats` WhatsApp trigger that posts the report, modelled on `!postpoll`? → A: Yes — a whole-message `!stats` command (case-insensitive, trimmed), sendable by **anyone** in the authorized group and intercepted **before** stat extraction (so it is never captured as a stat), posts the `stats --report` **human-readable** paste-ready block (FR-016) for the **current season** straight into the authorized group. Unlike `!postpoll` (silent on success), the posted report *is* the response. A 5-minute throttle applies: a trigger arriving within 5 minutes of the last successfully posted report is ignored (silent in-chat, logged only), mirroring `!postpoll`'s anti-spam window. A "no data" season posts the report's "no data" message rather than an empty block.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -117,6 +118,24 @@ As the captain, I want a single command that prints one paste-ready block combin
 
 ---
 
+### User Story 5 - In-chat `!stats` report trigger (Priority: P2)
+
+As any member of the team's WhatsApp group, I want to send `!stats` in the group and have the season report posted straight back into the chat, so the team can see the season's stats without anyone needing CLI or server access — exactly as `!postpoll` posts a poll on demand.
+
+**Why this priority**: This is the user's explicit "post the report into WhatsApp" deliverable and the concrete in-chat realisation of the reusable report (US4 / FR-013). It depends on the report calculation (US4) existing, so it follows it, but it is high value on its own — it puts the season stats in front of the whole team with one message.
+
+**Independent Test**: Via the test gateway, simulate a `!stats` message in the authorized group for a season with seeded data; verify the system posts the report's human-readable block (the same content `stats --report` produces) back to the group. Send `!stats` again within the throttle window and verify nothing is posted; send it after the window and verify the report is posted again. Simulate `!stats` for a season with no qualifying data and verify a "no data" message is posted rather than an empty block.
+
+**Acceptance Scenarios**:
+
+1. **Given** the current season has qualifying data, **When** any group member sends `!stats`, **Then** the system posts the report's human-readable paste-ready block (team section + per-player breakdown, per FR-016/FR-017/FR-018) for the current season to the authorized group.
+2. **Given** a `!stats` report was just posted, **When** any member sends `!stats` again within 5 minutes, **Then** the system posts nothing and is silent in-chat (the trigger is ignored and only logged).
+3. **Given** more than 5 minutes have passed since the last posted report, **When** `!stats` is sent again, **Then** the system posts a fresh report.
+4. **Given** the current season has no qualifying data, **When** `!stats` is sent, **Then** the system posts the report's "no data" message rather than an empty or misleading block.
+5. **Given** a normal message that merely contains the word "stats", **When** it is processed, **Then** nothing is triggered and the message is treated as ordinary chat — only a whole message equal to `!stats` (case-insensitive, trimmed) fires the command, and it is intercepted before stat extraction so it is never captured as a stat.
+
+---
+
 ### Edge Cases
 
 - **Empty season / no games**: a season with no games or no recorded stats reports "no data" cleanly (exit code distinguishes empty from error).
@@ -125,6 +144,11 @@ As the captain, I want a single command that prints one paste-ready block combin
 - **Partial / unknown lifestyle data**: lifestyle rates use the **attended-games** denominator (FR-008/FR-010). An attended game whose stat report has `weightDirection = unknown`/missing counts as a non-`down` game; an attended game with no stat record or a null/false `foodTracking` is treated as not tracked (`false`, the same default as `goals = 0`) and counts as a non-tracked game. Neither is excluded — both lower the rate rather than being dropped.
 - **Player with activity but no stat line for some games**: a completed game the player was available/yes for counts as a played game with 0 goals/0 assists even when no stat record exists; a game the player did not respond "available/yes" to is not counted in their per-game denominator at all.
 - **Invalid / non-existent season selector**: reports not-found cleanly.
+- **`!stats` spam / rapid re-trigger**: repeated `!stats` messages within the 5-minute window after a posted report are ignored silently (only logged); the group cannot be flooded with report messages, mirroring the `!postpoll` throttle.
+- **`!stats` with no current-season data**: the in-chat trigger posts the report's "no data" message rather than an empty block (consistent with FR-011 / US4 scenario 4).
+- **`!stats` with no current season at all**: when the team has no current/active season to report on, the in-chat trigger posts the same "no data" message (the chat command always targets the current season and takes no selector, so a missing current season is surfaced as "no data" rather than a "not found" error — the CLI's not-found/exit-1 path applies only to an explicit `--season <n>` selector, which the trigger does not accept).
+- **`!stats` report-computation failure**: an internal error while computing or posting the report is logged and does not crash the daemon; the trigger fails quietly in-chat (no partial or malformed report is posted), consistent with `!postpoll`'s error handling.
+- **`!stats` is not a stat**: like `!postpoll`, the `!stats` command is matched and handled before stat extraction, so it is never mistaken for a stat report even inside the post-game capture window.
 
 ## Requirements *(mandatory)*
 
@@ -148,6 +172,10 @@ As the captain, I want a single command that prints one paste-ready block combin
 - **FR-016**: The system MUST provide a single-output **report** mode of the `stats` command (e.g. `stats --report`) that, in one invocation, prints one contiguous block combining the team section and the per-player breakdown. The human-readable form MUST be plain text safe to paste into a chat app (WhatsApp) — no interactive pager, no fixed-width column layout or ANSI control codes that depend on a terminal — and a `--json` form MUST emit the same figures as structured data.
 - **FR-017**: The report's **team section** MUST include, computed over attended players only: average attendance per completed game, total goals, total assists, average goals per completed game, average assists per completed game, average weight-loss % per week, and average food-tracking % per week. "Per week" is the squad-level rate across attended games (mean of the per-player attended-game rates), reflecting the ~weekly fixture cadence.
 - **FR-018**: The report's **per-player breakdown** MUST include, for each player (canonical identity, attended players only): average goals per attended game, average assists per attended game, food-tracking % of attended games, and weight-loss % of attended games — using the attended-games denominator defined in FR-007/FR-008/FR-010.
+- **FR-019**: The system MUST treat a WhatsApp group message whose whole text (case-insensitive, whitespace-trimmed) equals `!stats` as a report-post command, sendable by **any** member of the authorized group. The command MUST be intercepted **before** stat extraction so it is never captured as a stat (consistent with the `!postpoll` trigger, FR-029 of spec 003), and a message that merely contains the word "stats" MUST NOT trigger it.
+- **FR-020**: On a `!stats` trigger, the system MUST compute the **current season's** report using the same reusable report calculation as `stats --report` (FR-013/FR-016/FR-017/FR-018) and post the report's **human-readable paste-ready block** (the chat-safe form of FR-016 — no pager, fixed-width columns, or ANSI codes) to the authorized group as the response. The post MUST go out through the **same outbound send path as `!postpoll`** — i.e. the Gateway's standard send operation governed by its outbound rate-limiter queue (the shared p-queue, ≤5 msg/min) — and MUST NOT bypass it, so the report is dispatched and rate-limited identically to every other outbound message. When the current season has no qualifying data, the system MUST post the report's "no data" message (FR-011) rather than an empty or misleading block.
+- **FR-021**: The system MUST enforce a minimum interval of **5 minutes** between two `!stats`-driven posts: a trigger arriving within that window of the last successfully posted report MUST be ignored — silent in-chat, logged only — so the group cannot be spammed with report messages. (This mirrors the `!postpoll` throttle window.)
+- **FR-022**: The system MUST log every `!stats` outcome (posted, throttled, no-data, failure). A failure while computing or posting the report MUST be logged and MUST NOT crash the daemon, and MUST NOT post a partial or malformed report (consistent with `!postpoll`'s error handling).
 
 ### Key Entities *(include if feature involves data)*
 
@@ -157,6 +185,7 @@ As the captain, I want a single command that prints one paste-ready block combin
 - **Stat record** (existing): the per-player-per-game source for goals, assists, weight direction, and food tracking.
 - **Availability poll response** (existing): the per-player-per-game source for attendance/availability.
 - **Chat report**: a derived, read-only single-block presentation for one season that composes the season aggregate (team section) and the player aggregates (per-player breakdown) into one paste-ready output; not stored, no new data, attended players only.
+- **`!stats` chat trigger**: a whole-message WhatsApp command (case-insensitive, trimmed) that any authorized-group member can send to post the current season's chat report into the group; subject to a 5-minute anti-spam throttle; reuses the same report calculation as `stats --report` and introduces no new stored data.
 
 ## Success Criteria *(mandatory)*
 
@@ -169,12 +198,17 @@ As the captain, I want a single command that prints one paste-ready block combin
 - **SC-005**: Every aggregate view supports both human-readable and JSON output.
 - **SC-006**: Players are counted once each regardless of how many address forms they appear under (zero double-counting across canonical identities).
 - **SC-007**: The captain can produce, in a single command, one paste-ready text block containing both the team headline stats and a per-player breakdown, with no manual reformatting needed to share it in a chat app.
+- **SC-008**: Any group member can post the current season's report into the WhatsApp group by sending `!stats`, with no CLI or server access; repeated triggers within 5 minutes of a posted report produce no further messages.
 
 ## Assumptions
 
 - **Single team**: like the existing `stats` command, aggregates are scoped to the single operator team (`teamId = 1`) in this delivery.
 - **Read-only / derived**: aggregates are computed on demand from existing tables; this feature introduces no new captured data and no new write paths.
-- **CLI-first**: the only delivery surface in this version is the CLI; the calculation layer is built to be reusable elsewhere later (FR-013), but no other surface is in scope now.
+- **CLI-first, plus the `!stats` chat trigger**: the CLI is the primary surface; the `!stats` WhatsApp trigger (US5) is the one additional surface in scope, and it consumes the same reusable report calculation (FR-013) rather than re-deriving anything. No surface beyond these two is in scope now.
+- **`!stats` targets the current season**: the in-chat trigger always reports the current/active season (no season selector in chat); historical seasons remain available via the `stats --report` CLI with its season selector. This keeps the chat command a zero-argument whole-message match like `!postpoll`.
+- **`!stats` posts the human-readable block**: the in-chat trigger posts only the chat-safe human-readable report (FR-016), never the `--json` form; JSON remains a CLI-only output.
+- **`!stats` throttle state**: the 5-minute throttle (FR-021) tracks the time of the last successfully posted `!stats` report; the mechanism for tracking it is left to planning (it need not survive a daemon restart, as it is purely an anti-spam guard), mirroring how `!postpoll` throttles on its last-posted time.
+- **Two distinct throttles**: FR-021's 5-minute window is an application-level anti-spam cooldown specific to `!stats`; it is separate from — and in addition to — the Gateway's outbound rate-limiter queue (the shared p-queue, ≤5 msg/min) that governs *all* sends (FR-020). The `!stats` report uses the same outbound queue/rate-limiter as `!postpoll`'s poll send rather than its own dispatch path.
 - **Season-only in v1**: per-player and team aggregates are scoped to a single season; an all-time scope is deferred to a later iteration (the calc layer remains reusable per FR-013 so it can be added without rework).
 - **Scope of metrics**: the headline metrics the user named (total goals, goals per game, weight-loss %, attendance %) are mandatory; the broader set identified from the data model (assists rates, leaderboards, squad size, turnout) are included where they reuse the same data cheaply.
 - **Weight is directional, not numeric**: the data model captures only a weight *direction* per game, so "weight-loss %" is the frequency at which weight was reported `down` over a player's **attended games** (FR-008), not a body-mass percentage. Attended games without a `down` direction (`up`/`same`/`unknown`/missing) count against the player; the squad figure is the mean of per-player rates.

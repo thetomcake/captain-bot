@@ -16,6 +16,8 @@ service/CLI integration tests follow `tests/README.md` (real `:memory:` DB, no o
 **Organization**: Tasks are grouped by user story. Per clarification Q1 the views are **new flags on
 the existing `stats` command** (not a new verb). US1 (`--summary`) is the shippable MVP; US2
 (`--players`), US4 (`--report`), and US3 (`--attendance`) are additive flags on the same command.
+US5 (`!stats` WhatsApp trigger, added 2026-06-19) is a **second surface** that reuses US4's report
+calc + formatter — see [Phase 8](#phase-8-user-story-5--stats-in-chat-report-trigger-priority-p2--added-2026-06-19).
 
 **Definition changes to keep front-of-mind (2026-06-19 clarifications):**
 
@@ -162,6 +164,41 @@ Single-project CLI layout (plan.md §Project Structure): sources in `src/`, test
 
 ---
 
+## Phase 8: User Story 5 — `!stats` in-chat report trigger (Priority: P2) — added 2026-06-19
+
+**Goal**: Any member of the authorized WhatsApp group can send `!stats` and the daemon posts the
+**current season's** report (the same block as `stats --report`) straight back into the group —
+modelled one-for-one on the existing `!postpoll` trigger. A 5-minute anti-spam cooldown applies; the
+posted report **is** the success response. Reuses US4's `getReport` + `formatReportBlock` (FR-013) —
+no new aggregation, schema, dependency, or write path.
+
+**Why after US4**: US5 is pure presentation reuse of the report that US4 (`--report`) delivers, so it
+depends on `AggregateService.getReport` (T023) and `formatReportBlock` (T024) already existing.
+
+**Independent Test**: Over `FakeGateway` + a real `:memory:` DB seeded with a current season (games,
+stat records, Yes votes) + `AggregateService`: a `!stats` message posts the report block; a second
+within the window posts nothing; one after the window posts again; a no-data season posts the "no
+data" message; ordinary chat containing "stats" is ignored; a compute/post failure is logged with
+nothing partial sent.
+
+### Tests for User Story 5 (write FIRST, must FAIL)
+
+- [ ] T036 [P] [US5] Write failing integration tests in `tests/integration/whatsapp/stats-trigger.test.ts`, mirroring `tests/integration/whatsapp/postpoll-trigger.test.ts` (seed via `createTestDatabase` + `FakeGateway`/`TEST_GROUP_ID`): an `isStatsCommand` block (`!stats`/`  !Stats  `/`!STATS` → true; `stats`/`!stats now`/`let's check stats`/`null`/`''` → false — FR-019); and a handler block wiring `createStatsHandler` over a real `AggregateService` and a current season seeded with completed games + `Yes` votes + stat records — (a) `!stats` posts exactly one `gateway.sentMessages` entry to `TEST_GROUP_ID` whose text equals `formatReportBlock(await service.getReport(seasonId))` (the posted report is the response — FR-020); (b) a current season with no qualifying data posts the report's **"no data"** message, not an empty block (FR-020/FR-011); (c) ordinary chat (`"how were the stats"`) sends nothing; (d) throttle — with real `STATS_MIN_INTERVAL_MS` and an injected `now`, a second `!stats` inside the window leaves `sentMessages` at length 1 (ignored, silent), then advancing `now` past the window posts a second report (FR-021); (e) a forced compute/post failure (e.g. a gateway whose `sendMessage` throws) is swallowed — no throw, no partial send (FR-022). (FR-019, FR-020, FR-021, FR-022, SC-008)
+
+### Implementation for User Story 5
+
+- [ ] T037 [US5] Implement `src/whatsapp/stats-trigger.ts` per [contracts/whatsapp-stats-trigger.md](./contracts/whatsapp-stats-trigger.md), modelled on `src/whatsapp/postpoll-trigger.ts`: export `STATS_MIN_INTERVAL_MS = 5 * 60 * 1000`, `isStatsCommand(text)` (whole trimmed/lower-cased message === `!stats`), and `createStatsHandler({ aggregateService, gateway, groupId, minIntervalMs?, now? })` returning `(message) => Promise<void>`. Handler: hold an in-process `lastPostedAt: number | null` in the closure; if a post happened within `minIntervalMs` (default `STATS_MIN_INTERVAL_MS`; `now` defaults to `Date.now`), log and return (silent); else `resolveSeason()` (no arg ⇒ current; **not-found ⇒ treat as no-data**), `getReport(season.id)`, and `gateway.sendMessage(groupId, formatReportBlock({ season, players }))` — or post the report's "no data" message when `!season.hasData`/not-found; set `lastPostedAt = now()` after **any** posted message; wrap compute/post in try/catch (log + return, never throw); log every outcome (`posted`/`no-data`/`throttled`/`failure`). A missing current season (`resolveSeason() → not-found`) is surfaced as **no-data** (post the "no data" message), not an error — the trigger takes no `--season` selector. **Constitution V**: model the *logic* of `postpoll-trigger.ts`, but do **not** copy its comment style — keep `stats-trigger.ts` free of spec/task IDs in `src/` (the template file's bare `FR-029`/`T050` comments are pre-existing violations; traceability goes in the commit `type(spec-008): …`, not the source). Makes T036 pass. Depends on T023 (`getReport`), T024 (`formatReportBlock`), T004 (`resolveSeason`).
+- [ ] T038 [US5] Modify `src/whatsapp/event-router.ts`: add a required `handleStats: (message: IncomingMessage) => void | Promise<void>` to `EventRouterDeps`, and inside `onMessage` gate `isStatsCommand(message.text)` **first, beside** the existing `isPostPollCommand` check (both before `statService.captureFromMessage`, so `!stats` is never captured as a stat — FR-019). Update the existing caller in `tests/integration/stats/stat-capture.test.ts` to pass a no-op `handleStats: async () => {}`. Depends on T037.
+- [ ] T039 [US5] Modify `src/cli/commands/daemon.ts`: construct `new AggregateService(db)` and `const handleStats = createStatsHandler({ aggregateService, gateway, groupId })`, and pass `handleStats` to `registerEventRouter({ ... })`. No scraper/cron change — `!stats` is a pure DB read. Depends on T037, T038.
+
+### Polish for User Story 5
+
+- [ ] T040 [US5] Run `npm run build` (strict typecheck), `npm test` (full suite green — incl. the new `stats-trigger` test and the **unchanged** `postpoll-trigger` / `stat-capture` tests), and `npm run format`. Confirm `!postpoll` and stat capture still route correctly after the event-router change, and that the posted report goes through `gateway.sendMessage` (the shared p-queue rate-limiter, FR-020). Optionally smoke `!stats` in a live group per [quickstart.md](./quickstart.md) US5. Depends on T036–T039. (Constitution II/III)
+
+**Checkpoint**: `!stats` posts the current season's report into the group, throttled to once per 5 minutes, reusing the US4 report end-to-end.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -170,6 +207,7 @@ Single-project CLI layout (plan.md §Project Structure): sources in `src/`, test
 - **Foundational (Phase 2)**: depends on Setup. **Blocks all user stories** (T002→T004 are prerequisites for every view; the `Participation` builder encodes the attended-games definition).
 - **User Stories (Phases 3–6)**: each depends on Foundational. US1 owns the shared command shell (`stats.ts` dispatcher, `index.ts` route registration); US2/US4/US3 extend that shell. US4 (report) additionally depends on US1+US2's pure functions. Priority order: P1 (US1) → P2 (US2, US4) → P3 (US3).
 - **Polish (Phase 7)**: depends on all desired stories being complete.
+- **US5 (Phase 8)**: depends on US4 being complete — it reuses `AggregateService.getReport` (T023) and `formatReportBlock` (T024). It touches only `src/whatsapp/*` + `daemon.ts` (independent of the `stats.ts`/`index.ts` CLI files), so it does not interact with the US1–US4 shared-file ordering.
 
 ### Key task dependencies
 
@@ -178,6 +216,7 @@ Single-project CLI layout (plan.md §Project Structure): sources in `src/`, test
 - T008 + T015 → T022 (the report composes both aggregates).
 - T011 (command shell + mutual-exclusivity) → T018, T025, T032 (views plug into it).
 - T012 (route registration) → T019, T026, T033 (added flags extend the route).
+- T023 (`getReport`) + T024 (`formatReportBlock`) → T037 (the `!stats` handler reuses both); T037 → T038 → T039 (trigger → router gate → daemon wiring).
 
 ### Shared-file ordering (NOT parallel within these files)
 
@@ -228,6 +267,7 @@ Task: "Implement season-summary formatters in src/cli/output/aggregate-formatter
 3. Add US4 (`--report`, the shareable WhatsApp block) → validate/demo.
 4. Add US3 (`--attendance`) → validate/demo.
 5. Polish (T034–T035).
+6. Add US5 (`!stats` in-chat trigger, T036–T040) → reuses US4's report on the WhatsApp surface → validate/demo.
 
 ---
 

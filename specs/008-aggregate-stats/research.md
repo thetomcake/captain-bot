@@ -178,3 +178,44 @@ so "no attended games" never tops a leaderboard.
 
 **Alternatives considered**: goals-only (meets the minimum but wastes computed metrics); an
 ascending option (no user need stated — out of scope).
+
+## 11. The `!stats` in-chat trigger — model, throttle, dispatch (US5, FR-019–FR-022)
+
+**Decision**: Add `src/whatsapp/stats-trigger.ts` modelled one-for-one on `postpoll-trigger.ts`:
+`isStatsCommand(text)` (whole-message `!stats`, case-insensitive/trimmed, checked **before** stat
+extraction), `STATS_MIN_INTERVAL_MS = 5 min`, and `createStatsHandler({ aggregateService, gateway,
+groupId, minIntervalMs?, now? })`. On a trigger it resolves the **current** season, calls
+`AggregateService.getReport`, and posts `formatReportBlock` via `gateway.sendMessage` (the posted
+report is the success response); a no-data/not-found season posts the report's "no data" message; any
+error is logged and swallowed. The 5-minute throttle state is held **in process memory** (closure
+variable advanced via an injectable `now()`), not persisted.
+
+**Rationale**:
+- *Reuse, not re-derive (FR-013):* the report calc (`getReport`/`aggregateReport`) and the chat-safe
+  formatter (`formatReportBlock`, §8) already exist for US4 and are paste-safe by construction
+  (FR-016). US5 is pure presentation reuse — the seam FR-013 was built for.
+- *In-memory throttle:* `!postpoll` throttles on `teams.lastPollPostedAt` because a poll is a
+  persisted artifact whose post-time is already recorded; a `!stats` report is not stored, so adding a
+  `lastReportPostedAt` column would be a schema migration purely for an anti-spam guard. The spec
+  assumption explicitly allows non-durable throttle state, so an in-process timestamp is the smaller,
+  schema-stable choice and preserves feature 008's "no schema change / no new write path" property. An
+  injectable `now()` keeps it deterministically testable (the `!postpoll` test backdates the DB
+  column; the in-memory analogue advances the clock).
+- *p-queue dispatch (FR-020):* `gateway.sendMessage` already routes through the Gateway's `RateLimiter`
+  (`sendLimiter.execute`, p-queue ≤5 msg/min). Posting the report through it means `!stats` is
+  rate-limited by the **same** outbound queue as every other send including `!postpoll` — no new or
+  bypassed dispatch path. The FR-021 cooldown and the gateway rate-limiter are distinct,
+  complementary throttles.
+- *Current season only:* the in-chat command takes no arguments (a whole-message match like
+  `!postpoll`); historical seasons stay on the `stats --report --season <n>` CLI. `resolveSeason()`
+  with no argument already yields the current season (or `not-found`), reused as-is.
+
+**Alternatives considered**:
+- *Persist `lastReportPostedAt` on `teams`* (exact `!postpoll` mechanism): rejected — a schema
+  migration for a throttle that need not survive restart; breaks the no-schema-change property.
+- *A new `!stats` dispatch/queue:* rejected — `gateway.sendMessage` already provides the required
+  p-queue rate-limiting (FR-020); a second path would diverge from `!postpoll`.
+- *Accept a season argument in chat (e.g. `!stats 2`):* rejected — over-scopes the trigger and breaks
+  the whole-message match; the CLI already covers historical seasons.
+- *Reply silently on success like `!postpoll`:* rejected — the user's deliverable is the report
+  appearing in chat, so the posted report **is** the success response.
