@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/007-auto-pin-poll/plan.md
+at specs/008-aggregate-stats/plan.md
 <!-- SPECKIT END -->
 
 ## Project Governance
