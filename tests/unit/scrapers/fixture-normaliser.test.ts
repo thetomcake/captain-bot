@@ -119,11 +119,22 @@ describe('normaliseOurFixtures (C2)', () => {
 
     it('carries time, venue and status through unchanged', () => {
       const { fixtures } = normaliseOurFixtures(
-        [fix({ homeTeam: 'White Team', awayTeam: 'Green Team', status: 'completed', time: '20:00' })],
+        [
+          fix({
+            homeTeam: 'White Team',
+            awayTeam: 'Green Team',
+            status: 'completed',
+            time: '20:00',
+          }),
+        ],
         TEAM,
         TODAY
       );
-      expect(fixtures[0]).toMatchObject({ time: '20:00', venue: 'Club Venue', status: 'completed' });
+      expect(fixtures[0]).toMatchObject({
+        time: '20:00',
+        venue: 'Club Venue',
+        status: 'completed',
+      });
     });
   });
 

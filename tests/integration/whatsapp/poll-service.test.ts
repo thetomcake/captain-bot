@@ -208,7 +208,14 @@ describe('PollService (Gateway-native)', () => {
 
     /** Build a PollService whose pin window is computed against {@link FIXED_NOW}. */
     function clockedService(now: Date = FIXED_NOW): PollService {
-      return new PollService(testDb.db, fixtureService, gateway, TEST_GROUP_ID, undefined, () => now);
+      return new PollService(
+        testDb.db,
+        fixtureService,
+        gateway,
+        TEST_GROUP_ID,
+        undefined,
+        () => now
+      );
     }
 
     it('pins the new poll for the window until game time (US1 P1/P7)', async () => {

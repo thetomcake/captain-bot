@@ -46,7 +46,12 @@ describe('US3 — recently-played game with pending score is not chosen', () => 
   });
 
   function service(html: string, now: Date): FixtureService {
-    return new FixtureService(test.db, new SeasonService(test.db), new MockFixtureScraper(html), () => now);
+    return new FixtureService(
+      test.db,
+      new SeasonService(test.db),
+      new MockFixtureScraper(html),
+      () => now
+    );
   }
 
   it('ignores a past game still showing `-` and selects the genuine future game (AS1/SC-004)', async () => {
